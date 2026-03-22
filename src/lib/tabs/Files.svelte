@@ -1819,28 +1819,28 @@
       </footer>
     </div>
 
+  <!-- QR Popover — must be outside {#if preview} so it shows without modal open -->
+  {#if qrAnchor && qrUrl}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="qr-popover"
+      style="left:{qrAnchor.x}px; top:{qrAnchor.y}px;"
+      onmouseenter={onQrPopoverEnter}
+      onmouseleave={onQrMouseLeave}
+      onclick={(e) => e.stopPropagation()}>
+      {#if qrDataUrl}
+        <img src={qrDataUrl} alt="QR code" class="qr-img" width="180" height="180" />
+      {:else}
+        <div class="qr-loading">Generating…</div>
+      {/if}
+      <div class="qr-url">{qrUrl}</div>
+      <div class="qr-hint">{qrCopied ? "✓ Copied!" : "Click icon to copy"}</div>
+      <a class="qr-open" href={qrUrl} target="_blank" rel="noopener">Open link ↗</a>
+    </div>
+  {/if}
+
   {#if preview}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- QR Popover -->
-      {#if qrAnchor && qrUrl}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <div class="qr-popover"
-          style="left:{qrAnchor.x}px; top:{qrAnchor.y}px;"
-          onmouseenter={onQrPopoverEnter}
-          onmouseleave={onQrMouseLeave}
-          onclick={(e) => e.stopPropagation()}>
-          {#if qrDataUrl}
-            <img src={qrDataUrl} alt="QR code" class="qr-img" width="180" height="180" />
-          {:else}
-            <div class="qr-loading">Generating…</div>
-          {/if}
-          <div class="qr-url">{qrUrl}</div>
-          <div class="qr-hint">{qrCopied ? "✓ Copied!" : "Click icon to copy"}</div>
-          <a class="qr-open" href={qrUrl} target="_blank" rel="noopener">Open link ↗</a>
-        </div>
-      {/if}
-
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="modal-wrap" onclick={(e) => e.stopPropagation()} role="presentation">
         <PreviewModal
