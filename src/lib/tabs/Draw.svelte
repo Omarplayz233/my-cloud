@@ -296,6 +296,9 @@
     "#e2e8f0","#94a3b8","#64748b","#334155","#1e293b",
   ];
 
+  // Mobile settings panel toggle
+  let mobilePanelOpen = $state(false);
+
   const TOOLS: { id: Tool; icon: any; label: string; key: string }[] = [
     { id: "pen",      icon: IconPencil,   label: "Pen",      key: "P" },
     { id: "brush",    icon: IconBrush,    label: "Brush",    key: "B" },
@@ -450,6 +453,75 @@
   </aside>
 
   <input bind:this={fileInput} type="file" accept="image/*" style="display:none" onchange={onFileLoad} />
+
+  <!-- Mobile bottom toolbar -->
+  <div class="mob-toolbar">
+    <div class="mob-tools">
+      {#each TOOLS as t}
+        <button class="mob-tool-btn" class:active={tool === t.id} title={t.label} onclick={() => tool = t.id}>
+          <t.icon size={20} stroke={1.6}/>
+        </button>
+      {/each}
+      <div class="mob-sep"></div>
+      <button class="mob-tool-btn" class:active={fill} onclick={() => fill = !fill} title="Fill">
+        <IconPentagon size={20} stroke={1.6}/>
+      </button>
+      <button class="mob-tool-btn" onclick={undo} title="Undo"><IconArrowBack size={20} stroke={1.6}/></button>
+      <button class="mob-tool-btn" onclick={redo} title="Redo"><IconArrowForward size={20} stroke={1.6}/></button>
+      <button class="mob-tool-btn danger" onclick={clearCanvas} title="Clear"><IconTrash size={20} stroke={1.6}/></button>
+      <div class="mob-sep"></div>
+      <button class="mob-tool-btn settings" onclick={() => mobilePanelOpen = !mobilePanelOpen} title="Settings">
+        <span style="font-size:18px">⚙</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Mobile settings drawer -->
+  {#if mobilePanelOpen}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="mob-overlay" onclick={() => mobilePanelOpen = false}></div>
+    <div class="mob-drawer">
+      <div class="mob-drawer-handle"></div>
+      <div class="mob-drawer-content">
+        <div class="mob-row">
+          <span class="panel-label">Color</span>
+          <input type="color" class="color-pick-sm" bind:value={color} />
+          <span class="panel-label">Background</span>
+          <input type="color" class="color-pick-sm" bind:value={bgColor} />
+        </div>
+        <div class="palette mob-palette">
+          {#each PALETTE as c}
+            <button class="swatch" class:selected={color === c} style="background:{c};" onclick={() => { color = c; }}></button>
+          {/each}
+        </div>
+        <div class="mob-row">
+          <span class="panel-label">Size {lineWidth}px</span>
+          <input type="range" class="slider mob-slider" min="1" max="80" bind:value={lineWidth} />
+        </div>
+        <div class="mob-row">
+          <span class="panel-label">Opacity {opacity}%</span>
+          <input type="range" class="slider mob-slider" min="1" max="100" bind:value={opacity} />
+        </div>
+        {#if tool === "brush"}
+          <div class="mob-row">
+            <span class="panel-label">Hardness {hardness}%</span>
+            <input type="range" class="slider mob-slider" min="0" max="100" bind:value={hardness} />
+          </div>
+        {/if}
+        <div class="mob-row">
+          <input class="name-input" type="text" bind:value={saveName} placeholder="filename.png" style="flex:1"/>
+        </div>
+        <div class="mob-actions">
+          <button class="action-btn" onclick={downloadPng}><IconDownload size={14}/> Download</button>
+          <button class="action-btn primary" onclick={saveToCloud} disabled={saving}><IconUpload size={14}/> {saving ? "Saving…" : "Save"}</button>
+          <button class="action-btn" onclick={loadImage}><IconUpload size={14}/> Load</button>
+        </div>
+        {#if saveOk}<span class="save-ok">✓ Saved!</span>{/if}
+        {#if saveError}<span class="save-err">{saveError}</span>{/if}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -625,4 +697,91 @@
 
   .save-ok  { font-size: 11px; color: var(--green); }
   .save-err { font-size: 11px; color: var(--red); }
+
+  /* ── Mobile ── */
+  .mob-toolbar { display: none; }
+  .mob-overlay { display: none; }
+  .mob-drawer  { display: none; }
+
+  @media (max-width: 640px) {
+    .toolbar { display: none; }
+    .panel   { display: none; }
+
+    .draw-root { flex-direction: column; }
+    .canvas-wrap { flex: 1; height: calc(100vh - 130px); }
+
+    /* Horizontal scrollable tool strip */
+    .mob-toolbar {
+      display: flex;
+      position: fixed;
+      bottom: 62px; /* above mobile nav */
+      left: 0; right: 0;
+      z-index: 50;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding: 6px 8px;
+      gap: 2px;
+    }
+    .mob-toolbar::-webkit-scrollbar { display: none; }
+    .mob-tools {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    .mob-tool-btn {
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--text-3);
+      cursor: pointer;
+      transition: all 0.12s;
+      flex-shrink: 0;
+    }
+    .mob-tool-btn:active { transform: scale(0.9); }
+    .mob-tool-btn.active { background: var(--hover); color: var(--accent); border-color: var(--accent); }
+    .mob-tool-btn.danger:active { color: var(--red); }
+    .mob-tool-btn.settings { color: var(--text-2); }
+    .mob-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; flex-shrink: 0; }
+
+    /* Settings drawer */
+    .mob-overlay {
+      display: block;
+      position: fixed; inset: 0; z-index: 90;
+      background: rgba(0,0,0,.4);
+    }
+    .mob-drawer {
+      display: flex; flex-direction: column;
+      position: fixed; left: 0; right: 0; bottom: 62px; z-index: 91;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+      border-radius: 20px 20px 0 0;
+      padding: 0 16px 16px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+    .mob-drawer-handle {
+      width: 36px; height: 4px;
+      background: var(--border-hover);
+      border-radius: 2px;
+      margin: 12px auto 10px;
+      flex-shrink: 0;
+    }
+    .mob-drawer-content { display: flex; flex-direction: column; gap: 10px; }
+    .mob-row { display: flex; align-items: center; gap: 10px; }
+    .mob-slider { flex: 1; }
+    .mob-palette { grid-template-columns: repeat(15, 1fr); }
+    .color-pick-sm {
+      width: 36px; height: 32px;
+      border-radius: 6px; border: 1px solid var(--border);
+      background: none; cursor: pointer; padding: 2px;
+    }
+    .mob-actions { display: flex; gap: 6px; }
+    .mob-actions .action-btn { flex: 1; justify-content: center; font-size: 11px; padding: 8px 6px; }
+  }
 </style>
