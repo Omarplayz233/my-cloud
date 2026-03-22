@@ -22,33 +22,34 @@
     }
   });
 
+  function loadScript(src: string): Promise<void> {
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = () => res();
+      s.onerror = () => rej(new Error(`Failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+
   async function loadFromCDN() {
+    // CSS
     if (!document.getElementById("tui-css")) {
       const link = document.createElement("link");
-      link.id = "tui-css";
-      link.rel = "stylesheet";
-      link.href = "https://cdn.jsdelivr.net/npm/tui-image-editor@3.15.3/dist/tui-image-editor.min.css";
+      link.id = "tui-css"; link.rel = "stylesheet";
+      link.href = "https://cdnjs.cloudflare.com/ajax/libs/tui-image-editor/3.15.3/tui-image-editor.min.css";
       document.head.appendChild(link);
     }
-    if (!(window as any).tui?.ImageEditor) {
-      // Fabric.js must load before TOAST UI
-      if (!(window as any).fabric) {
-        await new Promise<void>((res, rej) => {
-          const s = document.createElement("script");
-          s.src = "https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js";
-          s.onload = () => res();
-          s.onerror = () => rej(new Error("Failed to load fabric"));
-          document.head.appendChild(s);
-        });
-      }
-      await new Promise<void>((res, rej) => {
-        const s = document.createElement("script");
-        s.src = "https://cdn.jsdelivr.net/npm/tui-image-editor@3.15.3/dist/tui-image-editor.min.js";
-        s.onload = () => res();
-        s.onerror = () => rej(new Error("Failed to load editor"));
-        document.head.appendChild(s);
-      });
-    }
+
+    // Deps in order — fabric 1.6.7 is required by TOAST UI, NOT v5
+    if (!(window as any).fabric)
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/fabric.js/1.6.7/fabric.min.js");
+
+    if (!(window as any).tui?.["code-snippet"])
+      await loadScript("https://cdn.jsdelivr.net/npm/tui-code-snippet@1.5.2/dist/tui-code-snippet.min.js");
+
+    if (!(window as any).tui?.ImageEditor)
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/tui-image-editor/3.15.3/tui-image-editor.min.js");
 
     const TUI = (window as any).tui.ImageEditor;
     instance = new TUI(containerEl, {
@@ -64,10 +65,7 @@
       usageStatistics: false,
     });
 
-    if (initialFile) {
-      await loadFileFromCloud(initialFile.metaFileId, initialFile.fileName);
-    }
-
+    if (initialFile) await loadFileFromCloud(initialFile.metaFileId, initialFile.fileName);
     loading = false;
   }
 

@@ -7,9 +7,7 @@
     IconVolume, IconVolumeOff, IconMaximize, IconMinimize,
     IconPictureInPicture, IconFileText, IconMusic,
     IconPlayerSkipForward, IconPlayerSkipBack,
-    IconEye, IconEdit, IconArrowsExchange
-  } from "@tabler/icons-svelte";
-  import FileEditor from "./viewer/FileEditor.svelte";
+    } from "@tabler/icons-svelte";
 
   type FileRecord = {
     fileName: string; type: string; totalBytes: number; time: string;
@@ -276,7 +274,6 @@
   let zoom = $state(1);
 
   // ── Tab ───────────────────────────────────────────────────────────────────
-  type Tab = "preview" | "editor";
 
   function defaultTab(f: FileRecord): Tab {
     const ext = f.fileName.split('.').pop()?.toLowerCase() ?? '';
@@ -286,17 +283,7 @@
     if (textExts.includes(ext) || f.type.startsWith('text/') || f.type.includes('json')) return 'editor';
     return 'preview';
   }
-
-  let activeTab = $state<Tab>('preview');
   // Update default tab when a new file is opened
-  $effect(() => { activeTab = defaultTab(preview); });
-
-  function canEdit(t: string) {
-    return t.startsWith("image/") || t.startsWith("text/") || t === "application/json" || t === "application/epub+zip";
-  }
-  function canConvert(t: string) {
-    return t.startsWith("image/") || t.startsWith("video/") || t.startsWith("audio/");
-  }
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   function onKey(e: KeyboardEvent) {
@@ -323,32 +310,7 @@
       <span class="tb-sep">·</span>
       <span class="tb-size">{fmtBytes(preview.totalBytes)}</span>
     </div>
-    <!-- Tabs -->
-    {#if canEdit(preview.type) || canConvert(preview.type)}
-      <div class="tb-tabs">
-        <button class="tb-tab" class:tb-tab-active={activeTab === "preview"} onclick={() => activeTab = "preview"}>
-          <IconEye size={12}/> Preview
-        </button>
-        {#if canEdit(preview.type)}
-          <button class="tb-tab" class:tb-tab-active={activeTab === "editor"} onclick={() => activeTab = "editor"}>
-            <IconEdit size={12}/> Editor
-          </button>
-        {/if}
-        {#if canConvert(preview.type)}
-          <button class="tb-tab" class:tb-tab-active={activeTab === "converter"} onclick={() => activeTab = "converter"}>
-            <IconArrowsExchange size={12}/> Convert
-          </button>
-        {/if}
-      </div>
-    {/if}
-    <button class="tb-close" onclick={onclose} aria-label="Close"><IconX size={15}/></button>
-  </div>
-
-  <!-- Content stage -->
-  <div class="stage" onclick={e => e.stopPropagation()}>
-    {#if activeTab === "editor"}
-      <FileEditor file={preview} url={previewUrl} apiKey={apiKey}/>
-    {:else if previewLoading}
+    {#if previewLoading}
       <div class="loader"><div class="loader-ring"></div></div>
 
     {:else if previewUrl}
