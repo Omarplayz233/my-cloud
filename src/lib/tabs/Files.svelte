@@ -159,27 +159,41 @@
   let qrUrl     = $state<string | null>(null);
   let qrDataUrl = $state<string | null>(null);
   let qrCopied  = $state(false);
+  let qrHideTimer: ReturnType<typeof setTimeout> | null = null;
+  const qrCache = new Map<string, string>(); // url → dataUrl cache
 
-  $effect(() => {
-    const url = qrUrl;
-    if (!url) { qrDataUrl = null; return; }
-    import("qrcode").then(({ default: QRCode }) => {
-      QRCode.toDataURL(url, { width: 180, margin: 2, color: { dark: "#ffffff", light: "#1a1a1a" } })
-        .then(dataUrl => { qrDataUrl = dataUrl; });
-    });
-  });
+  async function generateQr(url: string) {
+    if (qrCache.has(url)) { qrDataUrl = qrCache.get(url)!; return; }
+    qrDataUrl = null;
+    const { default: QRCode } = await import("qrcode");
+    const dataUrl = await QRCode.toDataURL(url, { width: 180, margin: 2, color: { dark: "#ffffff", light: "#1a1a1a" } });
+    qrCache.set(url, dataUrl);
+    // Only apply if still showing this url
+    if (qrUrl === url) qrDataUrl = dataUrl;
+  }
 
   function onQrMouseEnter(e: MouseEvent, url: string) {
     e.stopPropagation();
+    if (qrHideTimer) { clearTimeout(qrHideTimer); qrHideTimer = null; }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     qrUrl    = url;
     qrAnchor = { x: rect.left + rect.width / 2, y: rect.top };
     qrCopied = false;
+    generateQr(url);
   }
 
   function onQrMouseLeave() {
-    qrAnchor = null;
-    qrUrl    = null;
+    // Small delay so moving mouse into the popover doesn't close it
+    qrHideTimer = setTimeout(() => {
+      qrAnchor = null;
+      qrUrl    = null;
+      qrDataUrl = null;
+      qrHideTimer = null;
+    }, 120);
+  }
+
+  function onQrPopoverEnter() {
+    if (qrHideTimer) { clearTimeout(qrHideTimer); qrHideTimer = null; }
   }
 
   async function onQrClick(e: MouseEvent, url: string) {
@@ -1813,7 +1827,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div class="qr-popover"
           style="left:{qrAnchor.x}px; top:{qrAnchor.y}px;"
-          onmouseenter={() => { /* keep open */ }}
+          onmouseenter={onQrPopoverEnter}
           onmouseleave={onQrMouseLeave}
           onclick={(e) => e.stopPropagation()}>
           {#if qrDataUrl}

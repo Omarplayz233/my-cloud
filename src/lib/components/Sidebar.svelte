@@ -6,9 +6,10 @@
     IconLogout, IconLock, IconLockOpen,
     IconFolder, IconFile, IconCloud, IconChevronUp, IconChevronDown,
     IconPencil,
+    IconChartBar,
   } from '@tabler/icons-svelte';
 
-  type Tab = 'files' | 'converter' | 'generators' | 'downloader' | 'browser' | 'draw';
+  type Tab = 'files' | 'converter' | 'generators' | 'downloader' | 'browser' | 'draw' | 'stats';
 
   let {
     user,
@@ -66,6 +67,7 @@
     { id: 'downloader', icon: IconDownload,        label: 'Downloader' },
     { id: 'browser',    icon: IconBrowser,          label: 'Browser'    },
     { id: 'draw',       icon: IconPencil,           label: 'Draw'       },
+    { id: 'stats',      icon: IconChartBar,          label: 'Stats'      },
   ];
 
   function fmtBytes(b: number) {

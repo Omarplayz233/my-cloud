@@ -9,6 +9,7 @@
   import Downloader from '$lib/tabs/Downloader.svelte';
   import Browser    from '$lib/tabs/Browser.svelte';
   import Draw       from '$lib/tabs/Draw.svelte';
+  import Stats      from '$lib/tabs/Stats.svelte';
 
   let { data } = $props();
   let user = $derived(data.user);
@@ -16,7 +17,7 @@
   let encryptedApiKey = $derived(data.encryptedApiKey);
 
   // Tab state
-  type Tab = 'files' | 'converter' | 'generators' | 'downloader' | 'browser' | 'draw';
+  type Tab = 'files' | 'converter' | 'generators' | 'downloader' | 'browser' | 'draw' | 'stats';
   let activeTab = $state<Tab>('files');
 
   // Stats passed up from Files tab
@@ -123,6 +124,8 @@
         <Browser />
       {:else if activeTab === 'draw'}
         <Draw {apiKey} />
+      {:else if activeTab === 'stats'}
+        <Stats {apiKey} />
       {/if}
     </main>
   </div>
