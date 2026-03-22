@@ -69,6 +69,10 @@
     { id: 'draw',       icon: IconPencil,           label: 'Draw'       },
     { id: 'stats',      icon: IconChartBar,          label: 'Stats'      },
   ];
+  // Mobile: primary tabs shown in bottom bar, secondary in sheet
+  const PRIMARY_TABS: Tab[] = ['files', 'draw', 'downloader', 'stats'];
+  const SECONDARY_TABS = TABS.filter(t => !PRIMARY_TABS.includes(t.id));
+  const primaryTabs = TABS.filter(t => PRIMARY_TABS.includes(t.id));
 
   function fmtBytes(b: number) {
     if (b < 1024) return `${b} B`;
@@ -158,19 +162,27 @@
 >
   <!-- Sheet (swipe up) -->
   <div class="mob-sheet" class:open={sheetOpen}>
-    <button class="sheet-handle" onclick={() => sheetOpen = !sheetOpen}>
-      {#if sheetOpen}<IconChevronDown size={16}/>{:else}<IconChevronUp size={16}/>{/if}
-    </button>
+    <button class="sheet-handle" onclick={() => sheetOpen = !sheetOpen}></button>
 
     {#if user}
       <div class="sheet-user">
         <div class="sb-avatar">{user.username[0].toUpperCase()}</div>
-        <span class="sheet-username">{user.username}</span>
+        <div class="sheet-user-info">
+          <span class="sheet-username">{user.username}</span>
+          <span class="sheet-storage">💾 {fmtBytes(storageBytes)} · {fileCount} files · {folderCount} folders</span>
+        </div>
       </div>
-      <div class="sheet-stats">
-        <span>💾 {fmtBytes(storageBytes)}</span>
-        <span>📁 {folderCount} folders</span>
-        <span>📄 {fileCount} files</span>
+      <div class="sheet-divider"></div>
+      <!-- Secondary tabs -->
+      <div class="sheet-tabs">
+        {#each SECONDARY_TABS as tab}
+          {@const active = activeTab === tab.id}
+          <button class="sheet-tab" class:sheet-tab-active={active}
+            onclick={() => { ontabchange(tab.id); sheetOpen = false; }}>
+            <tab.icon size={18} stroke={1.5}/>
+            <span>{tab.label}</span>
+          </button>
+        {/each}
       </div>
       <div class="sheet-divider"></div>
       <div class="sheet-actions">
@@ -187,19 +199,29 @@
     {/if}
   </div>
 
-  <!-- Always-visible tab bar -->
+  <!-- Always-visible tab bar — primary tabs only -->
   <nav class="mob-nav">
-    {#each TABS as tab}
+    {#each primaryTabs as tab}
       {@const active = activeTab === tab.id}
       <button
         class="mob-tab"
         class:mob-tab-active={active}
         onclick={() => { ontabchange(tab.id); sheetOpen = false; }}
       >
-        <tab.icon size={20} stroke={active ? 2 : 1.6}/>
+        <div class="mob-tab-icon">
+          <tab.icon size={21} stroke={active ? 2.2 : 1.5}/>
+          {#if active}<div class="mob-tab-dot"></div>{/if}
+        </div>
         <span>{tab.label}</span>
       </button>
     {/each}
+    <!-- More button -->
+    <button class="mob-tab" class:mob-tab-active={sheetOpen && !primaryTabs.some(t => t.id === activeTab)} onclick={() => sheetOpen = !sheetOpen}>
+      <div class="mob-tab-icon">
+        {#if sheetOpen}<IconChevronDown size={21} stroke={1.5}/>{:else}<IconChevronUp size={21} stroke={1.5}/>{/if}
+      </div>
+      <span>More</span>
+    </button>
   </nav>
 </div>
 
@@ -324,56 +346,90 @@
     .mob-sheet {
       background: var(--bg-2);
       border-top: 1px solid var(--border);
-      border-radius: 16px 16px 0 0;
-      padding: 0 20px 12px;
+      border-radius: 20px 20px 0 0;
+      padding: 0 16px 12px;
       max-height: 0; overflow: hidden;
-      transition: max-height 0.3s cubic-bezier(.16,1,.3,1), padding 0.3s;
+      transition: max-height 0.32s cubic-bezier(.16,1,.3,1), padding 0.32s;
     }
     .mob-sheet.open {
-      max-height: 320px;
-      padding: 0 20px 16px;
+      max-height: 420px;
+      padding: 0 16px 16px;
     }
     .sheet-handle {
       display: flex; align-items: center; justify-content: center;
-      width: 100%; padding: 10px 0 6px; background: none; border: none;
+      width: 100%; padding: 12px 0 8px; background: none; border: none;
       color: var(--text-3); cursor: pointer;
     }
+    .sheet-handle::before {
+      content: '';
+      width: 36px; height: 4px;
+      background: var(--border-hover);
+      border-radius: 2px;
+    }
     .sheet-user {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 0 8px;
+      display: flex; align-items: center; gap: 12px;
+      padding: 8px 0 10px;
     }
+    .sheet-user-info { display: flex; flex-direction: column; gap: 2px; }
     .sheet-username { font-size: 14px; font-weight: 600; color: var(--text-1); }
-    .sheet-stats {
-      display: flex; gap: 16px; flex-wrap: wrap;
-      font-size: 12px; color: var(--text-3); padding: 4px 0 10px;
-      font-family: 'Geist Mono', monospace;
+    .sheet-storage { font-size: 11px; color: var(--text-3); font-family: 'Geist Mono', monospace; }
+    .sheet-divider { border-top: 1px solid var(--border); margin: 8px 0; }
+    /* Secondary tabs in sheet */
+    .sheet-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      padding: 4px 0;
     }
-    .sheet-divider { border-top: 1px solid var(--border); margin: 4px 0 10px; }
+    .sheet-tab {
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      padding: 10px 8px; border-radius: 12px; border: 1px solid transparent;
+      background: var(--hover); color: var(--text-2);
+      font-size: 11px; font-weight: 500; font-family: 'Geist', sans-serif;
+      cursor: pointer; transition: .13s;
+    }
+    .sheet-tab:active { transform: scale(0.96); }
+    .sheet-tab-active { color: var(--accent); border-color: var(--accent); background: rgba(99,102,241,.08); }
     .sheet-actions { display: flex; flex-direction: column; gap: 4px; }
     .sheet-btn {
       display: flex; align-items: center; gap: 10px;
-      padding: 10px 12px; border-radius: 10px; border: none;
+      padding: 11px 14px; border-radius: 12px; border: none;
       background: var(--hover); color: var(--text-1);
       font-size: 13px; font-weight: 500; font-family: 'Geist', sans-serif;
       cursor: pointer; transition: .13s; text-align: left;
     }
+    .sheet-btn:active { transform: scale(0.98); }
     .sheet-btn-danger { color: #f87171; background: rgba(220,38,38,.08); }
 
     /* Tab bar */
     .mob-nav {
       display: flex; flex-direction: row;
       background: var(--bg-2); border-top: 1px solid var(--border);
-      height: 56px;
+      height: 62px;
+      padding: 0 4px;
     }
     .mob-tab {
       flex: 1; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 3px;
+      align-items: center; justify-content: center; gap: 2px;
       background: none; border: none; cursor: pointer;
       color: var(--text-3); font-size: 10px; font-weight: 500;
-      font-family: 'Geist', sans-serif; transition: .13s;
-      padding: 6px 0;
+      font-family: 'Geist', sans-serif; transition: color .13s;
+      padding: 6px 0; min-width: 0;
     }
-    .mob-tab:hover { color: var(--text-1); }
+    .mob-tab-icon {
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      width: 32px; height: 28px;
+    }
+    .mob-tab-dot {
+      position: absolute;
+      bottom: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 4px; height: 4px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+    .mob-tab:active { transform: scale(0.92); }
     .mob-tab-active { color: var(--accent); }
   }
 </style>

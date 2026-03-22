@@ -274,6 +274,10 @@
   });
   let dragOverIdx = $state<number | null>(null);
   let dragSrcIdx = $state<number | null>(null);
+  let dragGhost = $state<{ name: string; type: string; count: number } | null>(null);
+  let dragGhostX = $state(0);
+  let dragGhostY = $state(0);
+  let dragExternalCount = $state(0); // files dragged from OS
 
   const BASE = "";
   const CHUNK_SIZE = 18 * 1024 * 1024;
@@ -1051,6 +1055,7 @@
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
     dragActive = true;
+    dragExternalCount = e.dataTransfer?.items?.length ?? 0;
   }
   function handleDragLeave(e: DragEvent) {
     const rect = document.querySelector(".files-root")?.getBoundingClientRect();
@@ -1076,6 +1081,8 @@
   // Drag reorder
   function reorderDragStart(idx: number) {
     dragSrcIdx = idx;
+    const file = processedFiles[idx];
+    if (file) dragGhost = { name: file.fileName, type: file.type, count: 1 };
   }
   function reorderDragOver(e: DragEvent, idx: number) {
     e.preventDefault();
@@ -1276,7 +1283,15 @@
             ondrop={handleDrop}
           >
             <div class="drop-message">
-              <IconArrowUp size={40} /><span>Drop to upload</span>
+              <div class="drop-icon-wrap">
+                <IconArrowUp size={32} />
+              </div>
+              <span class="drop-title">Drop to upload</span>
+              {#if dragExternalCount > 1}
+                <span class="drop-sub">{dragExternalCount} files</span>
+              {:else if dragGhost}
+                <span class="drop-sub">{dragGhost.name}</span>
+              {/if}
             </div>
           </div>
         {/if}
@@ -1563,7 +1578,7 @@
                 ondragstart={() => reorderDragStart(idx)}
                 ondragover={(e) => reorderDragOver(e, idx)}
                 ondrop={() => reorderDrop(idx)}
-                ondragend={() => {
+                ondragend={() => { dragGhost = null;
                   dragSrcIdx = null;
                   dragOverIdx = null;
                 }}
@@ -1630,9 +1645,9 @@
                     <button class="act-btn" title="Public Link — hover for QR, click to copy"
                       onmouseenter={(e) => onQrMouseEnter(e, `${location.origin}/public/${getFullFilePath(file)}`)}
                       onmouseleave={onQrMouseLeave}
-                      onclick={(e) => onQrClick(e, `${location.origin}/public/${getFullFilePath(file)}`)}
+                      onclick={(e) => { if (!qrAnchor) onQrClick(e, `${location.origin}/public/${getFullFilePath(file)}`); }}
                       ontouchstart={(e) => onQrTouchStart(e, `${location.origin}/public/${getFullFilePath(file)}`)}
-                      ontouchend={onQrTouchEnd}
+                      ontouchend={(e) => { onQrTouchEnd(); if (!qrAnchor) { e.preventDefault(); const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); openQr(rect, `${location.origin}/public/${getFullFilePath(file)}`, true); } }}
                       ontouchmove={onQrTouchEnd}>
                       <IconLink size={14}/>
                     </button>
@@ -2011,19 +2026,48 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.85);
+    background: rgba(0, 0, 0, 0.75);
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 2px dashed var(--border-hover);
+    backdrop-filter: blur(2px);
   }
   .drop-message {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+    background: var(--bg-2);
+    border: 2px dashed var(--accent);
+    border-radius: 20px;
+    padding: 40px 60px;
+    color: var(--text-1);
+    animation: drop-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes drop-pulse {
+    0%, 100% { border-color: var(--accent); }
+    50% { border-color: var(--border-hover); }
+  }
+  .drop-icon-wrap {
+    width: 64px; height: 64px;
+    background: rgba(99,102,241,.15);
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+  }
+  .drop-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-1);
+  }
+  .drop-sub {
+    font-size: 12px;
     color: var(--text-3);
-    font-size: 16px;
+    font-family: "Geist Mono", monospace;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* ── Upload panel — bottom-right, stacked per file ── */
@@ -2482,7 +2526,10 @@
   }
   :global(.drag-over-folder) {
     border-color: #fbbf24 !important;
-    background: rgba(251, 191, 36, 0.05) !important;
+    background: rgba(251, 191, 36, 0.08) !important;
+    box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.2) !important;
+    transform: scale(1.01);
+    transition: all 0.1s ease !important;
   }
 
   .act-btn {
