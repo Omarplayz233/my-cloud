@@ -31,6 +31,16 @@
       document.head.appendChild(link);
     }
     if (!(window as any).tui?.ImageEditor) {
+      // Fabric.js must load before TOAST UI
+      if (!(window as any).fabric) {
+        await new Promise<void>((res, rej) => {
+          const s = document.createElement("script");
+          s.src = "https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js";
+          s.onload = () => res();
+          s.onerror = () => rej(new Error("Failed to load fabric"));
+          document.head.appendChild(s);
+        });
+      }
       await new Promise<void>((res, rej) => {
         const s = document.createElement("script");
         s.src = "https://cdn.jsdelivr.net/npm/tui-image-editor@3.15.3/dist/tui-image-editor.min.js";
