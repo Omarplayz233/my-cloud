@@ -588,8 +588,7 @@
   /* ── Base ──────────────────────────────────────────────────────────────── */
   .backdrop {
     position:fixed; inset:0; z-index:200;
-    background:rgba(0,0,0,0.92);
-    backdrop-filter:blur(20px) saturate(1.2);
+    background:rgba(0,0,0,0.88);
     display:flex; align-items:center; justify-content:center;
     font-family:'Geist',sans-serif;
   }
@@ -676,7 +675,7 @@
 
   /* ── Image ─────────────────────────────────────────────────────────────── */
   .img-stage { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
-  .img-el { max-width:96vw; max-height:90vh; object-fit:contain; transform-origin:center; transition:transform .18s cubic-bezier(.16,1,.3,1); }
+  .img-el { max-width:96vw; max-height:90vh; object-fit:contain; transform-origin:center; transition:transform .18s cubic-bezier(.16,1,.3,1); border-radius:0 !important; display:block; }
 
   /* ── Fallback ──────────────────────────────────────────────────────────── */
   .no-preview { display:flex; flex-direction:column; align-items:center; gap:10px; color:rgba(255,255,255,.25); font-size:13px; letter-spacing:.02em; }
