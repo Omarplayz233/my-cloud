@@ -10,27 +10,19 @@
   let containerEl: HTMLDivElement;
   let instance: any = null;
   let loading   = $state(true);
-  let saving     = $state(false);
-  let saveOk     = $state(false);
-  let saveError  = $state<string | null>(null);
-  let saveName   = $state(initialFile?.fileName ?? "edited.png");
-  let loadError  = $state<string | null>(null);
+  let saving    = $state(false);
+  let saveOk    = $state(false);
+  let saveError = $state<string | null>(null);
+  let saveName  = $state("edited.png");
+  let loadError = $state<string | null>(null);
 
-  async function initEditor() {
-    loading = true;
-    loadError = null;
-    try {
-      // Dynamically load TOAST UI
-      const { default: ImageEditor } = await import("@toast-ui/react-image-editor") as any;
-      // fallback — load via CDN script tag if module fails
-      throw new Error("use cdn");
-    } catch {
-      await loadFromCDN();
+  $effect(() => {
+    if (initialFile?.fileName) {
+      saveName = initialFile.fileName.replace(/(\.[^.]+)$/, "_edited$1");
     }
-  }
+  });
 
   async function loadFromCDN() {
-    // Load TOAST UI CSS
     if (!document.getElementById("tui-css")) {
       const link = document.createElement("link");
       link.id = "tui-css";
@@ -38,13 +30,12 @@
       link.href = "https://cdn.jsdelivr.net/npm/tui-image-editor@3.15.3/dist/tui-image-editor.min.css";
       document.head.appendChild(link);
     }
-    // Load TOAST UI JS
     if (!(window as any).tui?.ImageEditor) {
       await new Promise<void>((res, rej) => {
         const s = document.createElement("script");
         s.src = "https://cdn.jsdelivr.net/npm/tui-image-editor@3.15.3/dist/tui-image-editor.min.js";
         s.onload = () => res();
-        s.onerror = () => rej(new Error("Failed to load TOAST UI"));
+        s.onerror = () => rej(new Error("Failed to load editor"));
         document.head.appendChild(s);
       });
     }
@@ -63,7 +54,6 @@
       usageStatistics: false,
     });
 
-    // Load initial file if passed
     if (initialFile) {
       await loadFileFromCloud(initialFile.metaFileId, initialFile.fileName);
     }
@@ -80,7 +70,6 @@
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       await instance.loadImageFromURL(url, fileName.replace(/\.[^.]+$/, ""));
-      saveName = fileName.replace(/(\.[^.]+)$/, "_edited$1");
       URL.revokeObjectURL(url);
     } catch (e: any) {
       loadError = e?.message ?? "Failed to load image";
@@ -94,8 +83,9 @@
       const dataUrl = instance.toDataURL({ format: "png" });
       const res     = await fetch(dataUrl);
       const blob    = await res.blob();
+      const name    = saveName.endsWith(".png") ? saveName : saveName + ".png";
       const fd      = new FormData();
-      fd.append("file", blob, saveName.endsWith(".png") ? saveName : saveName + ".png");
+      fd.append("file", blob, name);
       const up = await fetch(`/api/telegram/uploadFile?api_key=${encodeURIComponent(apiKey)}`, {
         method: "POST", body: fd,
       });
@@ -118,11 +108,10 @@
     a.click();
   }
 
-  onMount(() => { initEditor(); });
-  onDestroy(() => { if (instance) { instance.destroy(); instance = null; } });
+  onMount(() => { loadFromCDN(); });
+  onDestroy(() => { if (instance) { try { instance.destroy(); } catch {} instance = null; } });
 
-  // Dark theme for TOAST UI
-  const blackTheme = {
+  const blackTheme: Record<string, string> = {
     "common.bi.image": "",
     "common.bisize.width": "0px",
     "common.bisize.height": "0px",
@@ -163,9 +152,6 @@
     "range.pointer.color": "#6366f1",
     "range.bar.color": "#2a2a2a",
     "range.subbar.color": "#6366f1",
-    "range.disabledPointer.color": "#444",
-    "range.disabledBar.color": "#222",
-    "range.disabledSubbar.color": "#333",
     "range.value.color": "#e2e2e2",
     "range.value.fontWeight": "400",
     "range.value.fontSize": "11px",
@@ -179,16 +165,10 @@
 </script>
 
 <div class="editor-root">
-  <!-- top bar -->
   <div class="editor-bar">
     <span class="editor-title">Image Editor</span>
     <div class="editor-actions">
-      <input
-        class="name-input"
-        type="text"
-        bind:value={saveName}
-        placeholder="filename.png"
-      />
+      <input class="name-input" type="text" bind:value={saveName} placeholder="filename.png" />
       <button class="e-btn" onclick={downloadLocally}>↓ Download</button>
       <button class="e-btn primary" onclick={saveToCloud} disabled={saving}>
         ↑ {saving ? "Saving…" : "Save to Cloud"}
@@ -196,11 +176,10 @@
     </div>
     {#if saveOk}<span class="ok">✓ Saved!</span>{/if}
     {#if saveError}<span class="err">{saveError}</span>{/if}
+    {#if loadError}<span class="err">{loadError}</span>{/if}
   </div>
 
-  {#if loadError}
-    <div class="center err">{loadError}</div>
-  {:else if loading}
+  {#if loading}
     <div class="center">
       <div class="spinner"></div>
       <span>Loading editor…</span>
@@ -211,77 +190,22 @@
 </div>
 
 <style>
-  .editor-root {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: var(--bg-1);
-    overflow: hidden;
-  }
-  .editor-bar {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 16px;
-    background: var(--bg-2);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    flex-wrap: wrap;
-  }
-  .editor-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-1);
-    flex-shrink: 0;
-  }
-  .editor-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    flex-wrap: wrap;
-  }
-  .name-input {
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 8px;
-    color: var(--text-1);
-    font-size: 12px;
-    font-family: "Geist", sans-serif;
-    outline: none;
-    width: 180px;
-  }
-  .name-input:focus { border-color: var(--border-hover); }
-  .e-btn {
-    display: flex; align-items: center; gap: 5px;
-    padding: 5px 12px; border-radius: 6px;
-    font-size: 12px; font-weight: 500; font-family: "Geist", sans-serif;
-    border: 1px solid var(--border); background: none;
-    color: var(--text-2); cursor: pointer; transition: .1s;
-  }
-  .e-btn:hover { background: var(--bg-3); color: var(--text-1); }
-  .e-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .e-btn.primary:hover { opacity: .9; }
-  .e-btn:disabled { opacity: .4; cursor: not-allowed; }
-  .ok  { font-size: 11px; color: var(--green); }
-  .err { font-size: 11px; color: var(--red); }
-  .tui-wrap {
-    flex: 1;
-    overflow: hidden;
-  }
-  .tui-wrap.hidden { visibility: hidden; height: 0; }
-  .center {
-    display: flex; flex-direction: column; align-items: center;
-    justify-content: center; gap: 12px; flex: 1;
-    color: var(--text-3); font-size: 13px;
-  }
-  .spinner {
-    width: 24px; height: 24px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .editor-root { display:flex; flex-direction:column; height:100vh; background:var(--bg-1); overflow:hidden; }
+  .editor-bar { display:flex; align-items:center; gap:10px; padding:8px 16px; background:var(--bg-2); border-bottom:1px solid var(--border); flex-shrink:0; flex-wrap:wrap; }
+  .editor-title { font-size:13px; font-weight:500; color:var(--text-1); flex-shrink:0; }
+  .editor-actions { display:flex; align-items:center; gap:6px; margin-left:auto; flex-wrap:wrap; }
+  .name-input { background:var(--bg-1); border:1px solid var(--border); border-radius:6px; padding:5px 8px; color:var(--text-1); font-size:12px; font-family:"Geist",sans-serif; outline:none; width:180px; }
+  .name-input:focus { border-color:var(--border-hover); }
+  .e-btn { display:flex; align-items:center; gap:5px; padding:5px 12px; border-radius:6px; font-size:12px; font-weight:500; font-family:"Geist",sans-serif; border:1px solid var(--border); background:none; color:var(--text-2); cursor:pointer; transition:.1s; }
+  .e-btn:hover { background:var(--bg-3); color:var(--text-1); }
+  .e-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .e-btn.primary:hover { opacity:.9; }
+  .e-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .ok  { font-size:11px; color:var(--green); }
+  .err { font-size:11px; color:var(--red); }
+  .tui-wrap { flex:1; overflow:hidden; }
+  .tui-wrap.hidden { visibility:hidden; height:0; }
+  .center { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; flex:1; color:var(--text-3); font-size:13px; }
+  .spinner { width:24px; height:24px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
 </style>
