@@ -160,6 +160,7 @@
   let qrDataUrl = $state<string | null>(null);
   let qrCopied  = $state(false);
   let qrHideTimer: ReturnType<typeof setTimeout> | null = null;
+  let qrShowTimer: ReturnType<typeof setTimeout> | null = null;
   const qrCache = new Map<string, string>();
 
   async function generateQr(url: string) {
@@ -175,21 +176,29 @@
   function onQrMouseEnter(e: MouseEvent, url: string) {
     e.stopPropagation();
     if (qrHideTimer) { clearTimeout(qrHideTimer); qrHideTimer = null; }
+    if (qrShowTimer) { clearTimeout(qrShowTimer); qrShowTimer = null; }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    qrUrl    = url;
-    qrAnchor = { x: rect.left + rect.width / 2, y: rect.top };
-    qrCopied = false;
-    generateQr(url);
+    qrShowTimer = setTimeout(() => {
+      qrUrl    = url;
+      qrAnchor = { x: rect.left + rect.width / 2, y: rect.top };
+      qrCopied = false;
+      qrShowTimer = null;
+      generateQr(url);
+    }, 1000);
   }
 
   function onQrMouseLeave() {
-    // 400ms so user can move mouse into popover
-    qrHideTimer = setTimeout(() => {
-      qrAnchor  = null;
-      qrUrl     = null;
-      qrDataUrl = null;
-      qrHideTimer = null;
-    }, 400);
+    // Cancel show — if user left before 1s, never show
+    if (qrShowTimer) { clearTimeout(qrShowTimer); qrShowTimer = null; }
+    // Only hide if already showing
+    if (qrAnchor) {
+      qrHideTimer = setTimeout(() => {
+        qrAnchor  = null;
+        qrUrl     = null;
+        qrDataUrl = null;
+        qrHideTimer = null;
+      }, 400);
+    }
   }
 
   function onQrPopoverEnter() {
