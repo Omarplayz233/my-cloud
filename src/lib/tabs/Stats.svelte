@@ -398,9 +398,31 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 700px) {
-    .cards { grid-template-columns: 1fr 1fr; }
+    .stats-root {
+      padding: 16px 12px 80px; /* bottom padding for mobile nav */
+      gap: 16px;
+    }
+    .stats-title { font-size: 17px; }
+    .cards {
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .card { padding: 12px; }
+    .card-val { font-size: 18px; }
     .two-col { grid-template-columns: 1fr; }
-    .type-row { grid-template-columns: 10px 80px 60px 1fr; }
-    .type-bytes { display: none; }
+    .section { padding: 14px; }
+    /* type row: drop the bar, keep dot/name/count/bytes */
+    .type-row {
+      grid-template-columns: 10px 1fr auto auto;
+      gap: 8px;
+    }
+    .type-bar-wrap { display: none; }
+    .type-bytes { display: block; }
+    /* bar chart — fewer labels, shorter bars */
+    .bar-chart { height: 80px; gap: 2px; }
+    .bar-label { font-size: 8px; }
+    /* file list rows */
+    .file-row { font-size: 11px; }
+    .file-rank { min-width: 14px; }
   }
 </style>
