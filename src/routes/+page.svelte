@@ -4,11 +4,10 @@
   import Login from '$lib/components/Login.svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
   import Files from '$lib/tabs/Files.svelte';
-  import Converter from '$lib/tabs/Converter.svelte';
   import Generators from '$lib/tabs/Generators.svelte';
   import Downloader from '$lib/tabs/Downloader.svelte';
-  import Browser    from '$lib/tabs/Browser.svelte';
   import Draw       from '$lib/tabs/Draw.svelte';
+  import Editor     from '$lib/tabs/Editor.svelte';
   import Stats      from '$lib/tabs/Stats.svelte';
 
   let { data } = $props();
@@ -17,8 +16,9 @@
   let encryptedApiKey = $derived(data.encryptedApiKey);
 
   // Tab state
-  type Tab = 'files' | 'converter' | 'generators' | 'downloader' | 'browser' | 'draw' | 'stats';
+  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor';
   let activeTab = $state<Tab>('files');
+  let editorFile = $state<{ metaFileId: string; fileName: string } | null>(null);
 
   // Stats passed up from Files tab
   let fileCount    = $state(0);
@@ -113,19 +113,18 @@
           onfileCountChange={(n) => fileCount = n}
           onfolderCountChange={(n) => folderCount = n}
           onstorageChange={(b) => storageBytes = b}
+          oneditimage={(f) => { editorFile = f; activeTab = 'editor'; }}
         />
-      {:else if activeTab === 'converter'}
-        <Converter />
       {:else if activeTab === 'generators'}
         <Generators />
       {:else if activeTab === 'downloader'}
         <Downloader />
-      {:else if activeTab === 'browser'}
-        <Browser />
       {:else if activeTab === 'draw'}
         <Draw {apiKey} />
       {:else if activeTab === 'stats'}
         <Stats {apiKey} />
+      {:else if activeTab === 'editor'}
+        <Editor {apiKey} initialFile={editorFile} />
       {/if}
     </main>
   </div>

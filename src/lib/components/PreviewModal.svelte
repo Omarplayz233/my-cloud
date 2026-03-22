@@ -9,7 +9,6 @@
     IconPlayerSkipForward, IconPlayerSkipBack,
     IconEye, IconEdit, IconArrowsExchange
   } from "@tabler/icons-svelte";
-  import FileConverter from "./viewer/FileConverter.svelte";
   import FileEditor from "./viewer/FileEditor.svelte";
 
   type FileRecord = {
@@ -277,7 +276,7 @@
   let zoom = $state(1);
 
   // ── Tab ───────────────────────────────────────────────────────────────────
-  type Tab = "preview" | "editor" | "converter";
+  type Tab = "preview" | "editor";
 
   function defaultTab(f: FileRecord): Tab {
     const ext = f.fileName.split('.').pop()?.toLowerCase() ?? '';
@@ -349,8 +348,6 @@
   <div class="stage" onclick={e => e.stopPropagation()}>
     {#if activeTab === "editor"}
       <FileEditor file={preview} url={previewUrl} apiKey={apiKey}/>
-    {:else if activeTab === "converter"}
-      <FileConverter file={preview} url={previewUrl}/>
     {:else if previewLoading}
       <div class="loader"><div class="loader-ring"></div></div>
 

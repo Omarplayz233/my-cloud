@@ -1,7 +1,7 @@
 <!-- src/lib/components/Sidebar.svelte -->
 <script lang="ts">
   import {
-    IconFiles, IconArrowsExchange, IconSparkles, IconDownload, IconBrowser,
+    IconFiles, IconSparkles, IconDownload, IconPhoto,
     IconSun, IconMoon, IconDeviceDesktop,
     IconLogout, IconLock, IconLockOpen,
     IconFolder, IconFile, IconCloud, IconChevronUp, IconChevronDown,
@@ -9,7 +9,7 @@
     IconChartBar,
   } from '@tabler/icons-svelte';
 
-  type Tab = 'files' | 'converter' | 'generators' | 'downloader' | 'browser' | 'draw' | 'stats';
+  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor';
 
   let {
     user,
@@ -62,11 +62,10 @@
 
   const TABS: { id: Tab; icon: any; label: string }[] = [
     { id: 'files',      icon: IconFiles,          label: 'Files'      },
-    { id: 'converter',  icon: IconArrowsExchange, label: 'Convert'    },
     { id: 'generators', icon: IconSparkles,        label: 'Generators' },
     { id: 'downloader', icon: IconDownload,        label: 'Downloader' },
-    { id: 'browser',    icon: IconBrowser,          label: 'Browser'    },
     { id: 'draw',       icon: IconPencil,           label: 'Draw'       },
+    { id: 'editor',     icon: IconPhoto,            label: 'Image Edit' },
     { id: 'stats',      icon: IconChartBar,          label: 'Stats'      },
   ];
   // Mobile: primary tabs shown in bottom bar, secondary in sheet

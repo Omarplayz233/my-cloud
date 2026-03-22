@@ -82,6 +82,7 @@
     onfileCountChange,
     onfolderCountChange,
     onstorageChange,
+    oneditimage,
   }: {
     user: { username: string; discordId?: string; createdAt?: string };
     apiKey: string;
@@ -90,6 +91,7 @@
     onfileCountChange: (n: number) => void;
     onfolderCountChange: (n: number) => void;
     onstorageChange: (b: number) => void;
+    oneditimage?: (file: { metaFileId: string; fileName: string }) => void;
   } = $props();
 
   async function copySharexCreds() {
@@ -1204,6 +1206,9 @@
       ...(isFile ? [
         ...(selectedIds.size <= 1 ? [
           { label: 'Open', icon: IconExternalLink, action: () => target && openPreview(target) },
+          ...(target?.type?.startsWith('image/') ? [
+            { label: 'Edit Image', icon: IconEdit, action: () => target && oneditimage?.({ metaFileId: target.metaFileId, fileName: target.fileName }) },
+          ] : []),
           { label: 'Rename', icon: IconEdit, action: () => { if (target) { renamingFileId = target.metaFileId; renameFileValue = target.fileName; } } },
           { label: 'Favorite', icon: target?.favorite ? IconStarFilled : IconStar, action: () => target && toggleFavorite(target) },
           { label: 'Public', icon: IconWorld, action: () => target && togglePublic(target) },
