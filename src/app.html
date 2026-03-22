@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		%sveltekit.head%
+		<style>
+			:root, [data-theme="dark"] {
+				--bg-1:#080808;--bg-2:#101010;--bg-3:#141414;
+				--text-1:#e2e2e2;--text-2:#888;--text-3:#444;
+				--border:#1a1a1a;--border-hover:#333;
+				--accent:#6366f1;--hover:rgba(255,255,255,.04);
+				--green:#4ade80;--green-border:#2a3d2e;
+				--red:#f87171;--red-border:#3d1515;--red-bg:#1f0a0a;
+			}
+			[data-theme="light"] {
+				--bg-1:#fafafa;--bg-2:#ffffff;--bg-3:#f0f0f0;
+				--text-1:#1a1a1a;--text-2:#555;--text-3:#999;
+				--border:#e0e0e0;--border-hover:#bbb;
+				--accent:#4f46e5;--hover:rgba(0,0,0,.04);
+				--green:#16a34a;--green-border:#bbf7d0;
+				--red:#dc2626;--red-border:#fca5a5;--red-bg:#fef2f2;
+			}
+			*{box-sizing:border-box;margin:0;padding:0}
+			body{background:var(--bg-1);color:var(--text-1);font-family:'Geist',system-ui,sans-serif;min-height:100vh}
+		</style>
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<script>
+			(function(){
+				var D={"--bg-1":"#080808","--bg-2":"#101010","--bg-3":"#141414","--text-1":"#e2e2e2","--text-2":"#888","--text-3":"#444","--border":"#1a1a1a","--border-hover":"#333","--accent":"#6366f1","--hover":"rgba(255,255,255,.04)","--green":"#4ade80","--green-border":"#2a3d2e","--red":"#f87171","--red-border":"#3d1515","--red-bg":"#1f0a0a"};
+				var L={"--bg-1":"#fafafa","--bg-2":"#ffffff","--bg-3":"#f0f0f0","--text-1":"#1a1a1a","--text-2":"#555","--text-3":"#999","--border":"#e0e0e0","--border-hover":"#bbb","--accent":"#4f46e5","--hover":"rgba(0,0,0,.04)","--green":"#16a34a","--green-border":"#bbf7d0","--red":"#dc2626","--red-border":"#fca5a5","--red-bg":"#fef2f2"};
+				try{
+					var t=localStorage.getItem('theme');
+					var dark=t==='dark'||(t!=='light'&&!window.matchMedia('(prefers-color-scheme: light)').matches);
+					var vars=dark?D:L;
+					var el=document.documentElement;
+					el.setAttribute('data-theme',dark?'dark':'light');
+					for(var k in vars)el.style.setProperty(k,vars[k]);
+				}catch(e){}
+			})();
+		</script>
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>
