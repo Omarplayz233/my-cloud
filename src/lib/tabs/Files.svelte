@@ -155,12 +155,14 @@
   let preview = $state<FileRecord | null>(null);
 
   // ── QR popover ────────────────────────────────────────────────────────────
-  let qrAnchor  = $state<{ x: number; y: number } | null>(null);
+  let qrAnchor  = $state<{ x: number; y: number; above: boolean } | null>(null);
   let qrUrl     = $state<string | null>(null);
   let qrDataUrl = $state<string | null>(null);
   let qrCopied  = $state(false);
+  let qrMobile  = $state(false); // full-screen on mobile
   let qrHideTimer: ReturnType<typeof setTimeout> | null = null;
   let qrShowTimer: ReturnType<typeof setTimeout> | null = null;
+  let qrLongPressTimer: ReturnType<typeof setTimeout> | null = null;
   const qrCache = new Map<string, string>();
 
   async function generateQr(url: string) {
@@ -173,29 +175,44 @@
     qrDataUrl = dataUrl;
   }
 
+  function openQr(rect: DOMRect, url: string, mobile = false) {
+    const popoverH = 300;
+    const popoverW = 220;
+    const margin   = 12;
+    const above    = rect.top - popoverH - margin > 0;
+    // Clamp X so popover never goes off left/right edge
+    const x = Math.min(
+      Math.max(rect.left + rect.width / 2, popoverW / 2 + margin),
+      window.innerWidth - popoverW / 2 - margin
+    );
+    // Y: if above, anchor to button top; if below, anchor to button bottom
+    const y = above ? rect.top : rect.bottom;
+    qrUrl    = url;
+    qrAnchor = { x, y, above };
+    qrCopied = false;
+    qrMobile = mobile;
+    generateQr(url);
+  }
+
   function onQrMouseEnter(e: MouseEvent, url: string) {
     e.stopPropagation();
     if (qrHideTimer) { clearTimeout(qrHideTimer); qrHideTimer = null; }
     if (qrShowTimer) { clearTimeout(qrShowTimer); qrShowTimer = null; }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     qrShowTimer = setTimeout(() => {
-      qrUrl    = url;
-      qrAnchor = { x: rect.left + rect.width / 2, y: rect.top };
-      qrCopied = false;
       qrShowTimer = null;
-      generateQr(url);
+      openQr(rect, url, false);
     }, 1000);
   }
 
   function onQrMouseLeave() {
-    // Cancel show — if user left before 1s, never show
     if (qrShowTimer) { clearTimeout(qrShowTimer); qrShowTimer = null; }
-    // Only hide if already showing
     if (qrAnchor) {
       qrHideTimer = setTimeout(() => {
         qrAnchor  = null;
         qrUrl     = null;
         qrDataUrl = null;
+        qrMobile  = false;
         qrHideTimer = null;
       }, 400);
     }
@@ -203,6 +220,25 @@
 
   function onQrPopoverEnter() {
     if (qrHideTimer) { clearTimeout(qrHideTimer); qrHideTimer = null; }
+  }
+
+  // Mobile long-press
+  function onQrTouchStart(e: TouchEvent, url: string) {
+    if (qrLongPressTimer) clearTimeout(qrLongPressTimer);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    qrLongPressTimer = setTimeout(() => {
+      qrLongPressTimer = null;
+      openQr(rect, url, true);
+    }, 600);
+  }
+  function onQrTouchEnd() {
+    if (qrLongPressTimer) { clearTimeout(qrLongPressTimer); qrLongPressTimer = null; }
+  }
+  function closeQrMobile() {
+    qrAnchor  = null;
+    qrUrl     = null;
+    qrDataUrl = null;
+    qrMobile  = false;
   }
 
   async function onQrClick(e: MouseEvent, url: string) {
@@ -1594,7 +1630,10 @@
                     <button class="act-btn" title="Public Link — hover for QR, click to copy"
                       onmouseenter={(e) => onQrMouseEnter(e, `${location.origin}/public/${getFullFilePath(file)}`)}
                       onmouseleave={onQrMouseLeave}
-                      onclick={(e) => onQrClick(e, `${location.origin}/public/${getFullFilePath(file)}`)}>
+                      onclick={(e) => onQrClick(e, `${location.origin}/public/${getFullFilePath(file)}`)}
+                      ontouchstart={(e) => onQrTouchStart(e, `${location.origin}/public/${getFullFilePath(file)}`)}
+                      ontouchend={onQrTouchEnd}
+                      ontouchmove={onQrTouchEnd}>
                       <IconLink size={14}/>
                     </button>
                     {#if isTextLikeFile(file)}
@@ -1830,22 +1869,42 @@
 
   <!-- QR Popover — must be outside {#if preview} so it shows without modal open -->
   {#if qrAnchor && qrUrl}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="qr-popover"
-      style="left:{qrAnchor.x}px; top:{qrAnchor.y}px;"
-      onmouseenter={onQrPopoverEnter}
-      onmouseleave={onQrMouseLeave}
-      onclick={(e) => e.stopPropagation()}>
-      {#if qrDataUrl}
-        <img src={qrDataUrl} alt="QR code" class="qr-img" width="180" height="180" />
-      {:else}
-        <div class="qr-loading">Generating…</div>
-      {/if}
-      <div class="qr-url">{qrUrl}</div>
-      <div class="qr-hint">{qrCopied ? "✓ Copied!" : "Click icon to copy"}</div>
-      <a class="qr-open" href={qrUrl} target="_blank" rel="noopener">Open link ↗</a>
-    </div>
+    {#if qrMobile}
+      <!-- Mobile: full overlay -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="qr-overlay" onclick={() => { qrAnchor = null; qrUrl = null; qrDataUrl = null; qrMobile = false; }}>
+        <div class="qr-modal" onclick={(e) => e.stopPropagation()}>
+          <button class="qr-close" onclick={() => { qrAnchor = null; qrUrl = null; qrDataUrl = null; qrMobile = false; }}>✕</button>
+          {#if qrDataUrl}
+            <img src={qrDataUrl} alt="QR code" class="qr-img" width="220" height="220" />
+          {:else}
+            <div class="qr-loading">Generating…</div>
+          {/if}
+          <div class="qr-url">{qrUrl}</div>
+          <a class="qr-open" href={qrUrl} target="_blank" rel="noopener">Open link ↗</a>
+        </div>
+      </div>
+    {:else}
+      <!-- Desktop: anchored popover -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <div class="qr-popover"
+        class:qr-below={!qrAnchor.above}
+        style="left:{qrAnchor.x}px; top:{qrAnchor.y}px;"
+        onmouseenter={onQrPopoverEnter}
+        onmouseleave={onQrMouseLeave}
+        onclick={(e) => e.stopPropagation()}>
+        {#if qrDataUrl}
+          <img src={qrDataUrl} alt="QR code" class="qr-img" width="180" height="180" />
+        {:else}
+          <div class="qr-loading">Generating…</div>
+        {/if}
+        <div class="qr-url">{qrUrl}</div>
+        <div class="qr-hint">{qrCopied ? "✓ Copied!" : "Click icon to copy"}</div>
+        <a class="qr-open" href={qrUrl} target="_blank" rel="noopener">Open link ↗</a>
+      </div>
+    {/if}
   {/if}
 
   {#if preview}
@@ -2712,6 +2771,43 @@
     box-shadow: 0 8px 32px rgba(0,0,0,.6);
     min-width: 210px;
   }
+  .qr-popover.qr-below {
+    transform: translateX(-50%) translateY(10px);
+  }
+  .qr-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    background: rgba(0,0,0,.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .qr-modal {
+    background: #1a1a1a;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    min-width: 260px;
+  }
+  .qr-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: 16px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+  }
+  .qr-close:hover { color: var(--text-1); }
   .qr-img {
     border-radius: 6px;
     display: block;
