@@ -13,6 +13,7 @@
   };
 
   let files     = $state<FileRecord[]>([]);
+  let folders   = $state<number>(0);
   let loading   = $state(true);
   let error     = $state<string | null>(null);
 
@@ -100,7 +101,8 @@
       const res = await fetch(`/api/telegram/ls?api_key=${encodeURIComponent(apiKey)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      files = data.files ?? [];
+      files   = data.files ?? [];
+      folders = (data.folders ?? []).length;
     } catch (e: any) {
       error = e?.message ?? "Failed to load stats";
     } finally {
@@ -147,6 +149,10 @@
       <div class="card">
         <span class="card-val">{totalFiles}</span>
         <span class="card-label">Total files</span>
+      </div>
+      <div class="card">
+        <span class="card-val">{folders}</span>
+        <span class="card-label">Total folders</span>
       </div>
       <div class="card">
         <span class="card-val">{fmtBytes(totalBytes)}</span>
@@ -261,7 +267,7 @@
   /* ── Cards ── */
   .cards {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
   }
   .card {

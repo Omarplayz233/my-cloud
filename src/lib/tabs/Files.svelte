@@ -160,16 +160,16 @@
   let qrDataUrl = $state<string | null>(null);
   let qrCopied  = $state(false);
   let qrHideTimer: ReturnType<typeof setTimeout> | null = null;
-  const qrCache = new Map<string, string>(); // url → dataUrl cache
+  const qrCache = new Map<string, string>();
 
   async function generateQr(url: string) {
     if (qrCache.has(url)) { qrDataUrl = qrCache.get(url)!; return; }
     qrDataUrl = null;
     const { default: QRCode } = await import("qrcode");
-    const dataUrl = await QRCode.toDataURL(url, { width: 180, margin: 2, color: { dark: "#ffffff", light: "#1a1a1a" } });
+    const dataUrl = await QRCode.toDataURL(url, { width: 200, margin: 2, color: { dark: "#ffffff", light: "#1a1a1a" } });
     qrCache.set(url, dataUrl);
-    // Only apply if still showing this url
-    if (qrUrl === url) qrDataUrl = dataUrl;
+    // Always set — race condition fix: don't check qrUrl
+    qrDataUrl = dataUrl;
   }
 
   function onQrMouseEnter(e: MouseEvent, url: string) {
@@ -183,13 +183,13 @@
   }
 
   function onQrMouseLeave() {
-    // Small delay so moving mouse into the popover doesn't close it
+    // 400ms so user can move mouse into popover
     qrHideTimer = setTimeout(() => {
-      qrAnchor = null;
-      qrUrl    = null;
+      qrAnchor  = null;
+      qrUrl     = null;
       qrDataUrl = null;
       qrHideTimer = null;
-    }, 120);
+    }, 400);
   }
 
   function onQrPopoverEnter() {
