@@ -168,7 +168,6 @@
             class="video"
             bind:currentTime={vCur}
             bind:duration={vDur}
-            bind:paused={(_p) => { vPlaying = !_p; if (!_p) vHideTimer = setTimeout(()=>vShow=false,2200); else { vShow=true; clearTimeout(vHideTimer); } }}
             onplay={() => { vPlaying=true; vHideTimer=setTimeout(()=>vShow=false,2200); }}
             onpause={() => { vPlaying=false; vShow=true; clearTimeout(vHideTimer); }}
             onwaiting={() => vBuf=true}
