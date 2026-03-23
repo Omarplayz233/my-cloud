@@ -114,7 +114,76 @@
   }
   onDestroy(() => clearTimeout(vHideTimer));
 
-  /* ── keyboard ── */
+  /* ── audio player ── */
+  let audioEl = $state<HTMLAudioElement | null>(null);
+  let aPlaying = $state(false);
+  let aCur = $state(0);
+  let aDur = $state(0);
+  let aVol = $state(1);
+  let aMuted = $state(false);
+  let aBuf = $state(false);
+  let aSeeking = $state(false);
+  let aSeekVal = $state(0);
+  let aPct = $derived(aDur ? (aCur / aDur) * 100 : 0);
+  // metadata
+  let metaTitle = $state<string>('');
+  let metaArtist = $state<string>('');
+  let metaAlbum = $state<string>('');
+  let metaCover = $state<string | null>(null);
+  let metaLoading = $state(false);
+
+  function aToggle() { audioEl?.paused ? audioEl.play() : audioEl?.pause(); }
+  function aSeekIn(e: Event) { aSeeking = true; aSeekVal = +(e.target as HTMLInputElement).value; }
+  function aSeekEnd(e: Event) { aSeeking = false; if (audioEl) audioEl.currentTime = +(e.target as HTMLInputElement).value; }
+  function aVolIn(e: Event) { aVol = +(e.target as HTMLInputElement).value; if (audioEl) audioEl.volume = aVol; }
+
+  $effect(() => {
+    if (previewKind(preview) === 'audio' && previewUrl) {
+      loadAudioMeta(previewUrl, preview.fileName);
+    }
+  });
+
+  async function loadAudioMeta(url: string, fileName: string) {
+    // default from filename
+    const bare = fileName.replace(/\.[^.]+$/, '');
+    const parts = bare.split(' - ');
+    metaTitle  = parts.length >= 2 ? parts.slice(1).join(' - ').trim() : bare;
+    metaArtist = parts.length >= 2 ? parts[0].trim() : '';
+    metaAlbum  = '';
+    metaCover  = null;
+    metaLoading = true;
+    try {
+      if (!(window as any).jsmediatags) {
+        await new Promise<void>((res, rej) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js';
+          s.onload = () => res();
+          s.onerror = () => rej();
+          document.head.appendChild(s);
+        });
+      }
+      const blob = await (await fetch(url)).blob();
+      await new Promise<void>((resolve) => {
+        (window as any).jsmediatags.read(blob, {
+          onSuccess(tag: any) {
+            const t = tag.tags;
+            if (t.title)  metaTitle  = t.title;
+            if (t.artist) metaArtist = t.artist;
+            if (t.album)  metaAlbum  = t.album;
+            if (t.picture) {
+              const { data, format } = t.picture;
+              const bytes = new Uint8Array(data);
+              const b64 = btoa(bytes.reduce((s: string, b: number) => s + String.fromCharCode(b), ''));
+              metaCover = `data:${format};base64,${b64}`;
+            }
+            resolve();
+          },
+          onError() { resolve(); }
+        });
+      });
+    } catch {}
+    metaLoading = false;
+  }
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape') onclose();
     if (e.key === ' ' && !e.repeat && previewKind(preview) === 'video') { e.preventDefault(); vToggle(); }
@@ -220,7 +289,87 @@
         </div>
 
       {:else if previewKind(preview) === 'audio'}
-        <audio src={previewUrl} controls class="audio"></audio>
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="audio-card" onclick={e => e.stopPropagation()}>
+          <audio
+            bind:this={audioEl}
+            src={previewUrl}
+            bind:currentTime={aCur}
+            bind:duration={aDur}
+            onplay={() => aPlaying = true}
+            onpause={() => aPlaying = false}
+            onwaiting={() => aBuf = true}
+            oncanplay={() => aBuf = false}
+            style="display:none"
+          ></audio>
+
+          <!-- cover art -->
+          <div class="ac-cover" style={metaCover ? `background-image:url(${metaCover})` : ''}>
+            {#if metaCover}
+              <img src={metaCover} alt="cover" class="ac-cover-img"/>
+            {:else}
+              <div class="ac-cover-placeholder">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
+                  <line x1="12" y1="9" x2="12" y2="2"/><line x1="12" y1="15" x2="12" y2="22"/>
+                </svg>
+              </div>
+            {/if}
+            <!-- spinning vinyl overlay when playing -->
+            <div class="ac-vinyl" class:spinning={aPlaying}></div>
+          </div>
+
+          <!-- info + controls -->
+          <div class="ac-body">
+            <div class="ac-meta">
+              <div class="ac-title">{metaTitle || preview.fileName}</div>
+              {#if metaArtist}<div class="ac-artist">{metaArtist}</div>{/if}
+              {#if metaAlbum}<div class="ac-album">{metaAlbum}</div>{/if}
+            </div>
+
+            <!-- seek bar -->
+            <div class="ac-seek">
+              <span class="ac-t">{fmtTime(aSeeking ? aSeekVal : aCur)}</span>
+              <div class="ac-bar">
+                <div class="ac-bar-fill" style="width:{aPct}%"></div>
+                <input type="range" class="ac-bar-input" min="0" max={aDur||100} step="0.1"
+                  value={aSeeking ? aSeekVal : aCur} oninput={aSeekIn} onchange={aSeekEnd}/>
+              </div>
+              <span class="ac-t">{fmtTime(aDur)}</span>
+            </div>
+
+            <!-- controls -->
+            <div class="ac-controls">
+              <div class="ac-vol">
+                <button class="ac-btn sm" onclick={() => { aMuted = !aMuted; if(audioEl) audioEl.muted = aMuted; }}>
+                  {#if aMuted || aVol === 0}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                  {:else}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                  {/if}
+                </button>
+                <div class="ac-vol-bar">
+                  <div class="ac-vol-fill" style="width:{aMuted ? 0 : aVol * 100}%"></div>
+                  <input type="range" class="ac-vol-input" min="0" max="1" step="0.02"
+                    value={aMuted ? 0 : aVol} oninput={aVolIn}/>
+                </div>
+              </div>
+
+              <button class="ac-play" onclick={aToggle}>
+                {#if aBuf}
+                  <div class="ac-spin"></div>
+                {:else if aPlaying}
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                {:else}
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                {/if}
+              </button>
+
+              <div class="ac-right-space"></div>
+            </div>
+          </div>
+        </div>
 
       {:else if previewKind(preview) === 'font'}
         <div class="font-stage" onclick={e => e.stopPropagation()}>
@@ -392,9 +541,6 @@
   .v-vol-fill { position:absolute; left:0; top:50%; transform:translateY(-50%); height:2.5px; border-radius:99px; background:#fff; pointer-events:none; }
   .v-vol-input { position:absolute; inset:0; width:100%; opacity:0; cursor:pointer; margin:0; }
 
-  /* ── Audio ── */
-  .audio { max-width:90vw; }
-
   /* ── Font preview ── */
   .font-stage {
     display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -453,6 +599,140 @@
     border-radius:12px; overflow:hidden;
     box-shadow:0 24px 64px rgba(0,0,0,.6);
     border:1px solid rgba(255,255,255,.07);
+  }
+
+  /* ── Audio player ── */
+  .audio-card {
+    display:flex; gap:0;
+    width:min(680px,90vw);
+    background:rgba(18,18,22,.95);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:20px;
+    overflow:hidden;
+    box-shadow:0 32px 80px rgba(0,0,0,.7);
+  }
+  .ac-cover {
+    width:200px; min-width:200px; height:200px;
+    position:relative; flex-shrink:0;
+    background:#111; display:flex;
+    align-items:center; justify-content:center;
+    background-size:cover; background-position:center;
+    overflow:hidden;
+  }
+  .ac-cover-img {
+    width:100%; height:100%; object-fit:cover;
+    position:absolute; inset:0;
+  }
+  .ac-cover-placeholder {
+    color:rgba(255,255,255,.15); z-index:1;
+  }
+  .ac-vinyl {
+    position:absolute; inset:0;
+    background:radial-gradient(circle at 50% 50%,
+      transparent 28%, rgba(0,0,0,.5) 28%,
+      rgba(0,0,0,.5) 30%, transparent 30%,
+      transparent 44%, rgba(0,0,0,.3) 44%,
+      rgba(0,0,0,.3) 46%, transparent 46%
+    );
+    opacity:0; transition:opacity .3s;
+  }
+  .ac-vinyl.spinning {
+    opacity:1;
+    animation:vinyl-spin 3s linear infinite;
+  }
+  @keyframes vinyl-spin { to { transform:rotate(360deg); } }
+
+  .ac-body {
+    flex:1; display:flex; flex-direction:column;
+    justify-content:center; gap:16px;
+    padding:24px 28px;
+    min-width:0;
+  }
+  .ac-meta { display:flex; flex-direction:column; gap:4px; }
+  .ac-title {
+    font-size:16px; font-weight:600; color:#fff;
+    letter-spacing:-.02em; line-height:1.3;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .ac-artist {
+    font-size:13px; color:rgba(255,255,255,.5); font-weight:500;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .ac-album {
+    font-size:11px; color:rgba(255,255,255,.3);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
+  .ac-seek {
+    display:flex; align-items:center; gap:10px;
+  }
+  .ac-t { font-size:10.5px; color:rgba(255,255,255,.35); font-family:'Geist Mono',monospace; flex-shrink:0; }
+  .ac-bar {
+    flex:1; position:relative; height:18px;
+    display:flex; align-items:center; cursor:pointer;
+  }
+  .ac-bar::before {
+    content:''; position:absolute; inset:0; margin:auto;
+    height:3px; border-radius:99px;
+    background:rgba(255,255,255,.12);
+  }
+  .ac-bar-fill {
+    position:absolute; left:0; top:50%;
+    transform:translateY(-50%); height:3px;
+    border-radius:99px; background:#fff;
+    pointer-events:none; max-width:100%;
+  }
+  .ac-bar-input {
+    position:absolute; inset:0; width:100%;
+    opacity:0; cursor:pointer; margin:0;
+  }
+
+  .ac-controls {
+    display:flex; align-items:center; gap:12px;
+  }
+  .ac-play {
+    width:48px; height:48px; border-radius:50%;
+    background:#fff; border:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    color:#000; transition:.15s; flex-shrink:0;
+  }
+  .ac-play:hover { transform:scale(1.06); }
+  .ac-btn { background:none; border:none; cursor:pointer; color:rgba(255,255,255,.5); display:flex; align-items:center; padding:4px; border-radius:6px; transition:.13s; }
+  .ac-btn:hover { color:#fff; }
+  .ac-vol {
+    display:flex; align-items:center; gap:6px; flex:1;
+  }
+  .ac-vol-bar {
+    flex:1; position:relative; height:16px;
+    display:flex; align-items:center; max-width:80px;
+  }
+  .ac-vol-bar::before {
+    content:''; position:absolute; inset:0; margin:auto;
+    height:2.5px; border-radius:99px;
+    background:rgba(255,255,255,.15);
+  }
+  .ac-vol-fill {
+    position:absolute; left:0; top:50%;
+    transform:translateY(-50%); height:2.5px;
+    border-radius:99px; background:rgba(255,255,255,.6);
+    pointer-events:none; max-width:100%;
+  }
+  .ac-vol-input {
+    position:absolute; inset:0; width:100%;
+    opacity:0; cursor:pointer; margin:0;
+  }
+  .ac-right-space { flex:1; }
+  .ac-spin {
+    width:18px; height:18px;
+    border:2px solid rgba(0,0,0,.2);
+    border-top-color:#000; border-radius:50%;
+    animation:kSpin .7s linear infinite;
+  }
+
+  @media(max-width:600px) {
+    .audio-card { flex-direction:column; width:min(340px,90vw); }
+    .ac-cover { width:100%; height:160px; }
+    .ac-body { padding:16px 20px; }
   }
 
   /* ── No preview ── */
