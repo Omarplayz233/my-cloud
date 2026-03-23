@@ -588,14 +588,20 @@
   /* ── Base ──────────────────────────────────────────────────────────────── */
   .backdrop {
     position:fixed; inset:0; z-index:200;
-    background:rgba(0,0,0,0.88);
+    background:rgba(0,0,0,0.92);
     display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
     font-family:'Geist',sans-serif;
   }
   .stage {
     position:absolute; inset:0;
     display:flex; align-items:center; justify-content:center;
-    overflow:hidden;
+    padding:80px 20px 90px;
+    box-sizing:border-box;
+    border-radius:0 !important;
+    background:transparent !important;
+    mask:none !important;
+    -webkit-mask:none !important;
   }
 
   /* ── Top bar ───────────────────────────────────────────────────────────── */
@@ -674,8 +680,8 @@
   .pdf-frame { width:90vw; height:85vh; border:none; border-radius:12px; background:#fff; box-shadow:0 24px 64px rgba(0,0,0,.7); }
 
   /* ── Image ─────────────────────────────────────────────────────────────── */
-  .img-stage { width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
-  .img-el { max-width:96vw; max-height:90vh; object-fit:contain; transform-origin:center; transition:transform .18s cubic-bezier(.16,1,.3,1); border-radius:0 !important; display:block; }
+  .img-stage { width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:transparent; }
+  .img-el { max-width:100%; max-height:100%; object-fit:contain; transform-origin:center; transition:transform .2s ease; border-radius:0 !important; display:block; }
 
   /* ── Fallback ──────────────────────────────────────────────────────────── */
   .no-preview { display:flex; flex-direction:column; align-items:center; gap:10px; color:rgba(255,255,255,.25); font-size:13px; letter-spacing:.02em; }
