@@ -41,15 +41,18 @@ export async function saveVaultMetadata(userId: string, data: object) {
     lastMessageId = result.result.message_id;
     cachedVaultConfig = data;
     
-    // Pin it
-    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: BACKUP_CHAT_ID,
-        message_id: lastMessageId
-      })
-    }).catch(() => {});
+    // Pin it (async, don't wait)
+    setTimeout(() => {
+      fetch(`https://api.telegram.org/bot${BOT_TOKEN}/pinChatMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: BACKUP_CHAT_ID,
+          message_id: lastMessageId,
+          disable_notification: true
+        })
+      }).catch(() => {});
+    }, 100);
   }
   
   return result;

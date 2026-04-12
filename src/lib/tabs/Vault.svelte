@@ -15,6 +15,8 @@
     IconCheck,
     IconAlertTriangle,
     IconDownload,
+    IconSearch,
+    IconX,
   } from '@tabler/icons-svelte';
 
   type VaultFile = {
@@ -40,6 +42,9 @@
   let uploadError = $state('');
   let files = $state<VaultFile[]>([]);
   let selectedName = $state('');
+  let searchQuery = $state('');
+  let sortBy = $state<'name' | 'size' | 'date'>('date');
+  let sortAsc = $state(false);
 
   const plainTotal = $derived(
     files.reduce((sum, file) => sum + file.size, 0)
@@ -63,6 +68,18 @@
 
   const activeDays = $derived(
     new Set(files.map((f) => new Date(f.createdAt).toDateString())).size
+  );
+
+  const filteredFiles = $derived(
+    files
+      .filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .sort((a, b) => {
+        let cmp = 0;
+        if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
+        if (sortBy === 'size') cmp = a.size - b.size;
+        if (sortBy === 'date') cmp = a.createdAt - b.createdAt;
+        return sortAsc ? cmp : -cmp;
+      })
   );
 
   function formatBytes(size: number) {
@@ -170,22 +187,28 @@
       }
 
       await loadVault();
+      selectedName = '';
     } catch (e: any) {
       uploadError = e?.message ?? 'Upload failed';
     } finally {
       uploading = false;
-      selectedName = '';
     }
   }
 
   async function removeFile(id: string) {
-    await fetch('/api/vault/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    });
+    try {
+      const res = await fetch('/api/vault/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
 
-    files = files.filter((f) => f.id !== id);
+      if (res.ok) {
+        files = files.filter((f) => f.id !== id);
+      }
+    } catch (e: any) {
+      uploadError = e?.message ?? 'Delete failed';
+    }
   }
 
   async function downloadFile(id: string) {
@@ -214,6 +237,7 @@
     files = [];
     password = '';
     error = '';
+    searchQuery = '';
   }
 
   onMount(() => {
@@ -327,9 +351,35 @@
             <h2>Vault contents</h2>
           </div>
           <div class="table-meta">
-            <span>{files.length} items</span>
+            <span>{filteredFiles.length} items</span>
             <span>{formatBytes(plainTotal)} plain</span>
           </div>
+        </div>
+
+        <div class="search-bar">
+          <IconSearch size={14} stroke={2} />
+          <input
+            type="text"
+            placeholder="Search files..."
+            bind:value={searchQuery}
+            class="search-input"
+          />
+          {#if searchQuery}
+            <button class="search-clear" onclick={() => searchQuery = ''}>
+              <IconX size={14} stroke={2} />
+            </button>
+          {/if}
+        </div>
+
+        <div class="sort-controls">
+          <select bind:value={sortBy} class="sort-select">
+            <option value="date">Sort by date</option>
+            <option value="name">Sort by name</option>
+            <option value="size">Sort by size</option>
+          </select>
+          <button class="sort-btn" onclick={() => sortAsc = !sortAsc}>
+            {sortAsc ? '↑' : '↓'}
+          </button>
         </div>
 
         <div class="table-shell">
@@ -341,7 +391,7 @@
             <span class="align-right">Actions</span>
           </div>
 
-          {#each files as file}
+          {#each filteredFiles as file}
             <div class="row">
               <span class="name-cell">
                 <span class="file-ico">
@@ -373,6 +423,11 @@
             <div class="empty">
               <IconFolder size={22} stroke={1.7} />
               <span>No files yet. Upload something to start filling the vault.</span>
+            </div>
+          {:else if filteredFiles.length === 0}
+            <div class="empty">
+              <IconSearch size={22} stroke={1.7} />
+              <span>No files match "{searchQuery}"</span>
             </div>
           {/if}
         </div>
@@ -596,6 +651,87 @@
     font-family: 'Geist Mono', monospace;
   }
 
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    color: var(--text-3);
+  }
+
+  .search-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-1);
+    font-size: 13px;
+    font-family: 'Geist', sans-serif;
+  }
+
+  .search-input::placeholder {
+    color: var(--text-3);
+  }
+
+  .search-clear {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-3);
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.12s;
+  }
+
+  .search-clear:hover {
+    color: var(--text-1);
+  }
+
+  .sort-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .sort-select {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-1);
+    font-size: 13px;
+    font-family: 'Geist', sans-serif;
+    cursor: pointer;
+  }
+
+  .sort-select:focus {
+    outline: none;
+    border-color: var(--border-hover);
+  }
+
+  .sort-btn {
+    padding: 8px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-1);
+    font-size: 13px;
+    cursor: pointer;
+    transition: 0.12s;
+  }
+
+  .sort-btn:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-3);
+  }
+
   .table-shell {
     border: 1px solid var(--border);
     border-radius: 14px;
@@ -746,6 +882,10 @@
 
     .action-buttons {
       justify-self: start;
+    }
+
+    .sort-controls {
+      flex-direction: column;
     }
   }
 </style>
