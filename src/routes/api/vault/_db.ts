@@ -1,42 +1,21 @@
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
 const BACKUP_CHAT_ID = process.env.TELEGRAM_BACKUP_CHAT_ID!;
 
-let pinnedMessageId: number | null = null;
 let cachedVaultConfig: any = null;
-
-async function getPinnedMessage() {
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates`);
-    const data = await res.json();
-    
-    for (const update of data.result || []) {
-      const msg = update.message || update.edited_message;
-      if (msg?.chat?.id == BACKUP_CHAT_ID && msg?.text?.startsWith('VAULT:')) {
-        return msg.message_id;
-      }
-    }
-  } catch (e) {
-    console.error('Error getting pinned message:', e);
-  }
-  return null;
-}
+let lastMessageId: number | null = null;
 
 export async function saveVaultMetadata(userId: string, data: object) {
   const json = JSON.stringify(data);
   const text = `VAULT:${userId}:${json}`;
   
-  if (!pinnedMessageId) {
-    pinnedMessageId = await getPinnedMessage();
-  }
-  
-  if (pinnedMessageId) {
-    // Update existing message
+  if (lastMessageId) {
+    // Try to edit existing message
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: BACKUP_CHAT_ID,
-        message_id: pinnedMessageId,
+        message_id: lastMessageId,
         text: text
       })
     });
@@ -47,7 +26,7 @@ export async function saveVaultMetadata(userId: string, data: object) {
     }
   }
   
-  // Create new message if update failed
+  // Create new message
   const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -59,7 +38,7 @@ export async function saveVaultMetadata(userId: string, data: object) {
   
   const result = await res.json();
   if (result.ok) {
-    pinnedMessageId = result.result.message_id;
+    lastMessageId = result.result.message_id;
     cachedVaultConfig = data;
     
     // Pin it
@@ -68,24 +47,18 @@ export async function saveVaultMetadata(userId: string, data: object) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: BACKUP_CHAT_ID,
-        message_id: pinnedMessageId
+        message_id: lastMessageId
       })
-    }).catch(e => console.error('Pin error:', e));
+    }).catch(() => {});
   }
   
   return result;
 }
 
 export async function getVaultMetadata(userId: string) {
-  if (cachedVaultConfig) {
+  if (cachedVaultConfig?.userId === userId) {
     return cachedVaultConfig;
   }
-  
-  if (!pinnedMessageId) {
-    pinnedMessageId = await getPinnedMessage();
-  }
-  
-  if (!pinnedMessageId) return null;
   
   try {
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates`);
@@ -93,9 +66,10 @@ export async function getVaultMetadata(userId: string) {
     
     for (const update of data.result || []) {
       const msg = update.message || update.edited_message;
-      if (msg?.message_id === pinnedMessageId && msg?.text?.startsWith(`VAULT:${userId}:`)) {
+      if (msg?.text?.startsWith(`VAULT:${userId}:`)) {
         const json = msg.text.replace(`VAULT:${userId}:`, '');
         cachedVaultConfig = JSON.parse(json);
+        lastMessageId = msg.message_id;
         return cachedVaultConfig;
       }
     }
