@@ -1,12 +1,16 @@
 import type { RequestHandler } from './$types';
-import store from '../_store';
+import { getVaultMetadata, saveVaultMetadata } from '../_db';
 
-export const POST: RequestHandler = async ({ request }) => {
-  if (!store.unlocked) return new Response('unauthorized', { status: 401 });
-
+export const POST: RequestHandler = async ({ request, locals, cookies }) => {
+  if (!locals.user?.id || !cookies.get('vault_session')) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  
   const { id } = await request.json();
-
-  store.files = store.files.filter(f => f.id !== id);
-
+  const vaultConfig = await getVaultMetadata(locals.user.id);
+  
+  vaultConfig.files = vaultConfig.files.filter((f: any) => f.id !== id);
+  await saveVaultMetadata(locals.user.id, vaultConfig);
+  
   return new Response('ok');
 };
