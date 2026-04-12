@@ -14,6 +14,7 @@
     IconFolder,
     IconCheck,
     IconAlertTriangle,
+    IconDownload,
   } from '@tabler/icons-svelte';
 
   type VaultFile = {
@@ -114,7 +115,7 @@
   async function unlock() {
     error = '';
     if (!password.trim()) {
-      error = 'enter password';
+      error = 'enter a passphrase';
       return;
     }
 
@@ -126,16 +127,18 @@
         body: JSON.stringify({ password: password.trim() })
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        error = 'access denied';
+        error = data.error || 'unlock failed';
         return;
       }
 
       locked = false;
       password = '';
       await loadVault();
-    } catch {
-      error = 'access denied';
+    } catch (e: any) {
+      error = e?.message ?? 'unlock failed';
     } finally {
       unlocking = false;
     }
@@ -185,6 +188,23 @@
     files = files.filter((f) => f.id !== id);
   }
 
+  async function downloadFile(id: string) {
+    try {
+      const res = await fetch(`/api/vault/download?id=${id}`);
+      if (!res.ok) throw new Error('Download failed');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = files.find(f => f.id === id)?.name || 'file';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      uploadError = e?.message ?? 'Download failed';
+    }
+  }
+
   async function refresh() {
     await loadVault();
   }
@@ -210,7 +230,7 @@
           <span>vault</span>
         </div>
         <h1>Locked space</h1>
-        <p>Unlock the vault to expose encrypted files and the storage measurements.</p>
+        <p>Enter a passphrase to unlock or create your vault.</p>
       </div>
 
       <div class="unlock-form">
@@ -318,7 +338,7 @@
             <span>Size</span>
             <span>Chunks</span>
             <span>Updated</span>
-            <span class="align-right">Action</span>
+            <span class="align-right">Actions</span>
           </div>
 
           {#each files as file}
@@ -338,8 +358,11 @@
                 <IconClock size={11} stroke={2} />
                 {formatDate(file.createdAt)}
               </span>
-              <span class="align-right">
-                <button class="row-btn danger" onclick={() => removeFile(file.id)}>
+              <span class="align-right action-buttons">
+                <button class="row-btn" onclick={() => downloadFile(file.id)} title="Download">
+                  <IconDownload size={13} stroke={2} />
+                </button>
+                <button class="row-btn danger" onclick={() => removeFile(file.id)} title="Delete">
                   <IconTrash size={13} stroke={2} />
                 </button>
               </span>
@@ -582,7 +605,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: minmax(0, 1.6fr) 92px 72px 130px 72px;
+    grid-template-columns: minmax(0, 1.6fr) 92px 72px 130px 1fr;
     gap: 10px;
     align-items: center;
     padding: 12px 14px;
@@ -655,6 +678,12 @@
     text-align: right;
   }
 
+  .action-buttons {
+    display: flex;
+    gap: 6px;
+    justify-self: end;
+  }
+
   .empty {
     display: flex;
     flex-direction: column;
@@ -713,6 +742,10 @@
 
     .vault-actions {
       flex-direction: column;
+    }
+
+    .action-buttons {
+      justify-self: start;
     }
   }
 </style>
