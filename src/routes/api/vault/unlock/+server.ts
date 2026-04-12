@@ -3,7 +3,13 @@ import { deriveKey, randomBytes, sha256 } from '../_crypto';
 import { saveVaultMetadata, getVaultMetadata } from '../_db';
 
 export const POST: RequestHandler = async ({ request, locals, cookies }) => {
-  if (!locals.user?.id) return new Response('Unauthorized', { status: 401 });
+  console.log('locals:', locals);
+  console.log('locals.user:', locals.user);
+  
+  if (!locals.user?.id) {
+    console.log('No user in locals');
+    return new Response(JSON.stringify({ error: 'Not authenticated' }), { status: 401 });
+  }
   
   const { password } = await request.json();
   if (!password || !password.trim()) {
@@ -11,16 +17,14 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
   }
 
   const userId = locals.user.id;
+  console.log('Unlocking vault for user:', userId);
   
-  // Get or create vault config
   let vaultConfig = await getVaultMetadata(userId);
+  console.log('Existing vault config:', vaultConfig);
   
   if (!vaultConfig) {
-    // First time setup
     const salt = randomBytes(16);
     const key = await deriveKey(password.trim(), salt);
-    
-    // Store the salt and hash for verification
     const exported = await crypto.subtle.exportKey('raw', key);
     const keyHash = await sha256(exported);
     
@@ -32,9 +36,9 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
       createdAt: Date.now()
     };
     
+    console.log('Creating new vault config:', vaultConfig);
     await saveVaultMetadata(userId, vaultConfig);
     
-    // Set session cookie
     cookies.set('vault_session', keyHash, {
       httpOnly: true,
       secure: true,
@@ -45,7 +49,6 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
     return new Response(JSON.stringify({ ok: true, new: true }));
   }
   
-  // Verify existing password
   const salt = new Uint8Array(Buffer.from(vaultConfig.salt, 'base64'));
   const key = await deriveKey(password.trim(), salt);
   const exported = await crypto.subtle.exportKey('raw', key);
