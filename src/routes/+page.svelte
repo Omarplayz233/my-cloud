@@ -9,6 +9,7 @@
   import Draw       from '$lib/tabs/Draw.svelte';
   import Editor     from '$lib/tabs/Editor.svelte';
   import Stats      from '$lib/tabs/Stats.svelte';
+  import Vault	    from '$lib/tabs/Vault.svelte';
 
   let { data } = $props();
   let user = $derived(data.user);
@@ -16,7 +17,7 @@
   let encryptedApiKey = $derived(data.encryptedApiKey);
 
   // Tab state
-  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor';
+  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault';
   let activeTab = $state<Tab>('files');
   let editorFile = $state<{ metaFileId: string; fileName: string } | null>(null);
 
@@ -125,6 +126,8 @@
         <Stats {apiKey} />
       {:else if activeTab === 'editor'}
         <Editor {apiKey} initialFile={editorFile} />
+      {:else if activeTab === 'vault'}
+      	<Vault />
       {/if}
     </main>
   </div>
