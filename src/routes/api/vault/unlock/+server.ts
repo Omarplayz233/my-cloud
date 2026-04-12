@@ -30,6 +30,7 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
     await saveVaultMetadata(userId, vaultConfig);
     
     cookies.set('vault_session', passwordHash, {
+      path: '/',
       httpOnly: true,
       secure: true,
       sameSite: 'strict',
@@ -47,6 +48,7 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
   }
   
   cookies.set('vault_session', passwordHash, {
+    path: '/',
     httpOnly: true,
     secure: true,
     sameSite: 'strict',
