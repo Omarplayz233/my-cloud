@@ -2,15 +2,31 @@ import type { RequestHandler } from './$types';
 import { getVaultMetadata, saveVaultMetadata } from '../_db';
 
 export const POST: RequestHandler = async ({ request, locals, cookies }) => {
-  if (!locals.user?.id || !cookies.get('vault_session')) {
+  const userId = locals.user?.id || 'default_user';
+  const sessionCookie = cookies.get('vault_session');
+  
+  if (!sessionCookie) {
     return new Response('Unauthorized', { status: 401 });
   }
   
-  const { id } = await request.json();
-  const vaultConfig = await getVaultMetadata(locals.user.id);
+  const vaultConfig = await getVaultMetadata(userId);
+  if (!vaultConfig) {
+    return new Response('Vault not setup', { status: 400 });
+  }
   
-  vaultConfig.files = vaultConfig.files.filter((f: any) => f.id !== id);
-  await saveVaultMetadata(locals.user.id, vaultConfig);
+  // Verify session
+  if (sessionCookie !== vaultConfig.hash) {
+    return new Response('Session invalid', { status: 401 });
+  }
   
-  return new Response('ok');
+  try {
+    const { id } = await request.json();
+    
+    vaultConfig.files = vaultConfig.files.filter((f: any) => f.id !== id);
+    await saveVaultMetadata(userId, vaultConfig);
+    
+    return new Response(JSON.stringify({ ok: true }));
+  } catch (e: any) {
+    return new Response(e.message || 'Delete failed', { status: 500 });
+  }
 };
