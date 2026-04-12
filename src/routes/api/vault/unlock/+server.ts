@@ -15,20 +15,21 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
     // Vault doesn't exist - CREATE IT with this password
     const salt = randomBytes(16);
     const key = await deriveKey(password.trim(), salt);
-    const exported = await crypto.subtle.exportKey('raw', key);
-    const keyHash = await sha256(exported);
+    
+    // Hash the password directly to store as verification
+    const passwordHash = await sha256(new TextEncoder().encode(password.trim()));
     
     vaultConfig = {
       userId,
       salt: Buffer.from(salt).toString('base64'),
-      hash: keyHash,
+      hash: passwordHash,
       files: [],
       createdAt: Date.now()
     };
     
     await saveVaultMetadata(userId, vaultConfig);
     
-    cookies.set('vault_session', keyHash, {
+    cookies.set('vault_session', passwordHash, {
       httpOnly: true,
       secure: true,
       sameSite: 'strict',
@@ -39,16 +40,13 @@ export const POST: RequestHandler = async ({ request, locals, cookies }) => {
   }
   
   // Vault EXISTS - VERIFY the password
-  const salt = new Uint8Array(Buffer.from(vaultConfig.salt, 'base64'));
-  const key = await deriveKey(password.trim(), salt);
-  const exported = await crypto.subtle.exportKey('raw', key);
-  const keyHash = await sha256(exported);
+  const passwordHash = await sha256(new TextEncoder().encode(password.trim()));
   
-  if (keyHash !== vaultConfig.hash) {
+  if (passwordHash !== vaultConfig.hash) {
     return new Response(JSON.stringify({ error: 'Wrong passphrase' }), { status: 401 });
   }
   
-  cookies.set('vault_session', keyHash, {
+  cookies.set('vault_session', passwordHash, {
     httpOnly: true,
     secure: true,
     sameSite: 'strict',
