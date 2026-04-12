@@ -67,7 +67,7 @@
     { id: 'draw',       icon: IconPencil,           label: 'Draw'       },
     { id: 'editor',     icon: IconPhoto,            label: 'Image Edit' },
     { id: 'stats',      icon: IconChartBar,          label: 'Stats'      },
-    { id: 'vault',	icon: IconLock,			label: 'Vault'},
+    { id: 'vault',      icon: IconLock,             label: 'Vault'      },
   ];
   // Mobile: primary tabs shown in bottom bar, secondary in sheet
   const PRIMARY_TABS: Tab[] = ['files', 'draw', 'downloader', 'stats'];
