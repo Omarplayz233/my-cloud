@@ -1,44 +1,72 @@
-import { randomBytes, deriveKey } from "../_crypto";
-import { getVaultMetadata, saveVaultMetadata, saveEncryptedFile } from "../_db";
+import type { RequestHandler } from './$types';
+import {
+  deriveVaultKey,
+  decryptJson,
+  randomBytes,
+  sha256,
+  loadVaultIndex,
+  loadVaultRegistry,
+  saveVaultState,
+  uploadVaultFileChunks,
+  VaultRegistryPlain
+} from '../_vault';
 
-export const POST = async ({ request, cookies }) => {
-  const userId = "default_user";
-  const session = cookies.get("vault_session");
+export const POST: RequestHandler = async ({ request, locals, cookies }) => {
+  const userId = locals.user?.id || 'default_user';
+  const sessionCookie = cookies.get('vault_session');
 
-  const vault = await getVaultMetadata(userId);
-  if (!vault || session !== vault.hash) {
-    return new Response("unauthorized", { status: 401 });
+  if (!sessionCookie) {
+    return new Response('Unauthorized', { status: 401 });
   }
 
   const form = await request.formData();
-  const file = form.get("file");
+  const file = form.get('file');
+
+  if (!(file instanceof File)) {
+    return new Response('No file', { status: 400 });
+  }
+
+  const passHash = sessionCookie;
+  const password = String(form.get('password') || '').trim();
+
+  if (!password) {
+    return new Response('Password missing for vault key derivation', { status: 400 });
+  }
+
+  const existingSaltGuess = randomBytes(16);
+  const key = await deriveVaultKey(password, existingSaltGuess);
+
+  const index = await loadVaultIndex(key);
+  if (!index || index.userId !== userId || index.hash !== passHash) {
+    return new Response('Session invalid', { status: 401 });
+  }
+
+  const registry = await loadVaultRegistry(key, index.registryFileId!);
 
   const raw = await file.arrayBuffer();
-
-  const salt = Buffer.from(vault.salt, "base64");
-  const key = await deriveKey(session, salt);
-
   const iv = randomBytes(12);
 
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
+    { name: 'AES-GCM', iv },
     key,
     raw
   );
 
-  const fileId = await saveEncryptedFile(userId, crypto.randomUUID(), encrypted);
+  const chunks = await uploadVaultFileChunks(encrypted, crypto.randomUUID());
 
-  const entry = {
+  const fileEntry = {
     id: crypto.randomUUID(),
     name: file.name,
     size: file.size,
     createdAt: Date.now(),
-    iv: Buffer.from(iv).toString("base64"),
-    file_id: fileId
+    iv: Buffer.from(iv).toString('base64'),
+    chunks
   };
 
-  vault.files.push(entry);
-  await saveVaultMetadata(userId, vault);
+  registry.files.push(fileEntry);
+  registry.updatedAt = Date.now();
 
-  return new Response(JSON.stringify({ ok: true }));
+  await saveVaultState(key, index, registry);
+
+  return new Response(JSON.stringify({ ok: true, id: fileEntry.id }));
 };

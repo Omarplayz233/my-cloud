@@ -1,38 +1,72 @@
-import { deriveKey, randomBytes, sha256 } from "../_crypto";
-import { saveVaultMetadata, getVaultMetadata } from "../_db";
+import type { RequestHandler } from './$types';
+import {
+  deriveVaultKey,
+  randomBytes,
+  sha256,
+  saveVaultState,
+  loadVaultIndex,
+  encryptJson,
+  VaultIndexPlain,
+  VaultRegistryPlain
+} from '../_vault';
 
-export const POST = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies, locals }) => {
   const { password } = await request.json();
-  const userId = "default_user";
+  const userId = locals.user?.id || 'default_user';
 
-  let vault = await getVaultMetadata(userId);
+  if (!password || !String(password).trim()) {
+    return new Response(JSON.stringify({ error: 'Password required' }), { status: 400 });
+  }
 
-  if (!vault) {
-    const salt = randomBytes(16);
-    const key = await deriveKey(password, salt);
+  const pass = String(password).trim();
+  const salt = randomBytes(16);
+  const key = await deriveVaultKey(pass, salt);
 
-    const hash = await sha256(new TextEncoder().encode(password));
+  const passwordHash = await sha256(pass);
 
-    vault = {
-      salt: Buffer.from(salt).toString("base64"),
-      hash,
-      files: []
+  const existing = await loadVaultIndex(key).catch(() => null);
+
+  if (!existing) {
+    const registry: VaultRegistryPlain = {
+      version: 1,
+      files: [],
+      updatedAt: Date.now()
     };
 
-    await saveVaultMetadata(userId, vault);
+    const index: VaultIndexPlain = {
+      version: 1,
+      userId,
+      salt: Buffer.from(salt).toString('base64'),
+      hash: passwordHash,
+      registryFileId: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
 
-    cookies.set("vault_session", hash, { path: "/" });
+    await saveVaultState(key, index, registry);
+
+    cookies.set('vault_session', passwordHash, {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      maxAge: 3600
+    });
 
     return new Response(JSON.stringify({ ok: true, created: true }));
   }
 
-  const hash = await sha256(new TextEncoder().encode(password));
-
-  if (hash !== vault.hash) {
-    return new Response(JSON.stringify({ error: "wrong password" }), { status: 401 });
+  if (existing.hash !== passwordHash) {
+    return new Response(JSON.stringify({ error: 'Wrong passphrase' }), { status: 401 });
   }
 
-  cookies.set("vault_session", hash, { path: "/" });
+  cookies.set('vault_session', passwordHash, {
+    path: '/',
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: 3600
+  });
 
-  return new Response(JSON.stringify({ ok: true }));
+  return new Response(JSON.stringify({ ok: true, created: false }));
 };
