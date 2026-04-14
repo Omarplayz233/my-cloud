@@ -63,11 +63,8 @@
   const TABS: { id: Tab; icon: any; label: string }[] = [
     { id: 'files',      icon: IconFiles,          label: 'Files'      },
     { id: 'generators', icon: IconSparkles,        label: 'Generators' },
-    { id: 'downloader', icon: IconDownload,        label: 'Downloader' },
     { id: 'draw',       icon: IconPencil,           label: 'Draw'       },
-    { id: 'editor',     icon: IconPhoto,            label: 'Image Edit' },
     { id: 'stats',      icon: IconChartBar,          label: 'Stats'      },
-    { id: 'vault',      icon: IconLock,             label: 'Vault'      },
   ];
   // Mobile: primary tabs shown in bottom bar, secondary in sheet
   const PRIMARY_TABS: Tab[] = ['files', 'draw', 'downloader', 'stats'];
