@@ -5,7 +5,6 @@ import fs from 'fs';
 import crypto from 'crypto';
 import path from 'path';
 import os from 'os';
-import { repairRegistry, findFolderBySignature } from '$lib/server/registryRepair';
 
 export type ApiKeyRecord = {
   apiKey: string;
@@ -267,24 +266,19 @@ async function getRegistryPtr(): Promise<{ file_id: string; message_id: number }
 export async function readRegistry(): Promise<Record<string, FileRecord>> {
   const ptr = await getRegistryPtr();
   if (!ptr) return {};
-
+  
   const local = await getLocalCache();
   if (local.registryData && local.registryPtr?.file_id === ptr.file_id) {
-    const repaired = repairRegistry(local.registryData);
-    if (JSON.stringify(repaired) !== JSON.stringify(local.registryData)) {
-      await updateLocalCache({ registryData: repaired, registryPtr: ptr });
-    }
-    return repaired;
+    return local.registryData;
   }
 
   try {
     const text = await downloadFileId(ptr.file_id, 'text');
     const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-
-    const repaired = repairRegistry(parsed as Record<string, FileRecord>);
-    await updateLocalCache({ registryData: repaired, registryPtr: ptr });
-    return repaired;
+    const result = parsed as Record<string, FileRecord>;
+    await updateLocalCache({ registryData: result, registryPtr: ptr });
+    return result;
   } catch (err) {
     console.warn('telegramStorage.readRegistry: failed parse', (err as any).message || err);
     return {};
@@ -315,33 +309,6 @@ export async function writeRegistry(registry: Record<string, any>): Promise<void
       params: { chat_id: CHAT_ID, message_id: oldPtr.message_id }
     }).catch(() => { });
   }
-}
-
-export async function getOrCreateFolder(
-  name: string,
-  parentId?: string | null,
-  extra: Partial<FileRecord> = {}
-): Promise<FileRecord> {
-  const registry = repairRegistry((await readRegistry()) ?? {});
-  const found = findFolderBySignature(registry, name, parentId ?? null);
-
-  if (found?.value) {
-    return found.value;
-  }
-
-  const folderId = `folder:${crypto.randomUUID()}`;
-  const folder = {
-    _type: 'folder' as const,
-    folderId,
-    name: name.trim() || 'New Folder',
-    createdAt: new Date().toISOString(),
-    ...(parentId ? { parentId } : {}),
-    ...extra
-  };
-
-  registry[folderId] = folder;
-  await writeRegistry(registry);
-  return folder;
 }
 
 export async function registerFile(rec: FileRecord): Promise<void> {

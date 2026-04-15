@@ -1,319 +1,243 @@
-// src/lib/server/folderOps.ts
+// src/routes/api/telegram/folderOps/+server.ts
+import type { RequestHandler } from './$types';
+import {
+  getRecordByApiKey,
+  readRegistry,
+  writeRegistry
+} from '$lib/telegramStorage';
+import crypto from 'crypto';
 
 export type FolderRecord = {
   _type: 'folder';
   folderId: string;
   name: string;
   createdAt: string;
-  parentId?: string;
+  parentId?: string | null;
   favorite?: boolean;
   public?: boolean;
 };
 
-export type FolderRegistryItem =
-  | FolderRecord
-  | Record<string, unknown>;
-
-export type FolderOpsClientOptions = {
-  /**
-   * A fetch implementation.
-   * In SvelteKit server code, pass `event.fetch` when possible.
-   */
-  fetch: typeof fetch;
-
-  /**
-   * Your API key for the Telegram storage backend.
-   * Sent as `x-api-key`.
-   */
-  apiKey: string;
-
-  /**
-   * Defaults to `/api/telegram/folderOps`.
-   * Use an absolute URL if you are calling this outside a request context.
-   */
-  baseUrl?: string;
-};
-
-export class FolderOpsError extends Error {
-  status: number;
-  details?: unknown;
-
-  constructor(message: string, status = 500, details?: unknown) {
-    super(message);
-    this.name = 'FolderOpsError';
-    this.status = status;
-    this.details = details;
-  }
+function apiKey(req: Request) {
+  return (req.headers.get('x-api-key') ?? '').trim();
 }
 
-type JsonResponse<T> = {
-  [key: string]: unknown;
-} & T;
-
-type GetFoldersResponse = {
-  folders: FolderRecord[];
-};
-
-type CreateFolderInput = {
-  name?: string;
-  parentId?: string;
-};
-
-type RenameFolderInput = {
-  folderId: string;
-  name?: string;
-  parentId?: string | null;
-};
-
-type DeleteFolderInput = {
-  folderId: string;
-};
-
-type MoveFileInput = {
-  metaFileId: string;
-  folderId?: string | null;
-};
-
-type TogglePublicInput = {
-  folderId: string;
-  recursive?: boolean;
-};
-
-type DuplicateFileInput = {
-  metaFileId: string;
-  newName?: string;
-};
-
-function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim();
-  if (!trimmed) return '/api/telegram/folderOps';
-  return trimmed.replace(/\/+$/, '');
-}
-
-function buildUrl(baseUrl: string, apiKey: string): string {
-  const url = new URL(baseUrl, typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
-  url.searchParams.set('api_key', apiKey);
-  return url.toString();
-}
-
-async function parseJsonResponse<T>(res: Response): Promise<T> {
-  const text = await res.text();
-
-  let data: any = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-  }
-
-  if (!res.ok) {
-    const message =
-      (data && typeof data === 'object' && typeof data.error === 'string' && data.error) ||
-      (typeof data === 'string' && data) ||
-      `Request failed with status ${res.status}`;
-
-    throw new FolderOpsError(message, res.status, data);
-  }
-
-  return data as T;
-}
-
-function authHeaders(apiKey: string): HeadersInit {
-  return {
-    'x-api-key': apiKey.trim(),
-    'Content-Type': 'application/json'
-  };
-}
-
-function createClient(options: FolderOpsClientOptions) {
-  const fetchImpl = options.fetch;
-  const apiKey = options.apiKey.trim();
-  const baseUrl = normalizeBaseUrl(options.baseUrl ?? '/api/telegram/folderOps');
-
-  if (!apiKey) {
-    throw new FolderOpsError('Missing API key', 401);
-  }
-
-  async function request<T>(
-    method: 'GET' | 'POST',
-    body?: Record<string, unknown>,
-    useQueryKey = false
-  ): Promise<T> {
-    const url = useQueryKey ? buildUrl(baseUrl, apiKey) : baseUrl;
-
-    const res = await fetchImpl(url, {
-      method,
-      headers: authHeaders(apiKey),
-      body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined
-    });
-
-    return parseJsonResponse<T>(res);
-  }
-
-  return {
-    async listFolders(): Promise<FolderRecord[]> {
-      const data = await request<GetFoldersResponse>('GET');
-      return Array.isArray(data.folders) ? data.folders : [];
-    },
-
-    async createFolder(input: CreateFolderInput = {}): Promise<FolderRecord> {
-      const data = await request<JsonResponse<{ folder: FolderRecord }>>('POST', {
-        action: 'create',
-        name: input.name,
-        parentId: input.parentId
-      });
-      if (!data.folder) throw new FolderOpsError('Folder creation failed');
-      return data.folder;
-    },
-
-    async renameFolder(input: RenameFolderInput): Promise<boolean> {
-      await request<JsonResponse<{ ok: true }>>('POST', {
-        action: 'rename',
-        folderId: input.folderId,
-        name: input.name,
-        parentId: input.parentId
-      });
-      return true;
-    },
-
-    async deleteFolder(input: DeleteFolderInput): Promise<boolean> {
-      await request<JsonResponse<{ ok: true }>>('POST', {
-        action: 'delete',
-        folderId: input.folderId
-      });
-      return true;
-    },
-
-    async moveFile(input: MoveFileInput): Promise<boolean> {
-      await request<JsonResponse<{ ok: true }>>('POST', {
-        action: 'moveFile',
-        metaFileId: input.metaFileId,
-        folderId: input.folderId ?? null
-      });
-      return true;
-    },
-
-    async toggleFavorite(folderId: string): Promise<{ favorite: boolean }> {
-      const data = await request<JsonResponse<{ ok: true; favorite: boolean }>>('POST', {
-        action: 'toggleFavorite',
-        folderId
-      });
-      return { favorite: Boolean(data.favorite) };
-    },
-
-    async duplicateFile(input: DuplicateFileInput): Promise<Record<string, unknown>> {
-      const data = await request<JsonResponse<{ file: Record<string, unknown> }>>('POST', {
-        action: 'duplicate',
-        metaFileId: input.metaFileId,
-        newName: input.newName
-      });
-      if (!data.file) throw new FolderOpsError('Duplicate failed');
-      return data.file;
-    },
-
-    async togglePublic(input: TogglePublicInput): Promise<{ public: boolean }> {
-      const data = await request<JsonResponse<{ ok: true; public: boolean }>>('POST', {
-        action: 'togglePublic',
-        folderId: input.folderId,
-        recursive: Boolean(input.recursive)
-      });
-      return { public: Boolean(data.public) };
-    }
-  };
-}
-
-/**
- * Create a reusable client bound to your fetch + API key.
- */
-export function createFolderOpsClient(options: FolderOpsClientOptions) {
-  return createClient(options);
-}
-
-/**
- * Convenience one-off helper for listing folders.
- */
-export async function listFolders(options: FolderOpsClientOptions): Promise<FolderRecord[]> {
-  return createClient(options).listFolders();
-}
-
-export async function createFolder(options: FolderOpsClientOptions, input: CreateFolderInput = {}) {
-  return createClient(options).createFolder(input);
-}
-
-export async function renameFolder(options: FolderOpsClientOptions, input: RenameFolderInput) {
-  return createClient(options).renameFolder(input);
-}
-
-export async function deleteFolder(options: FolderOpsClientOptions, input: DeleteFolderInput) {
-  return createClient(options).deleteFolder(input);
-}
-
-export async function moveFile(options: FolderOpsClientOptions, input: MoveFileInput) {
-  return createClient(options).moveFile(input);
-}
-
-export async function toggleFavorite(options: FolderOpsClientOptions, folderId: string) {
-  return createClient(options).toggleFavorite(folderId);
-}
-
-export async function duplicateFile(options: FolderOpsClientOptions, input: DuplicateFileInput) {
-  return createClient(options).duplicateFile(input);
-}
-
-export async function togglePublic(options: FolderOpsClientOptions, input: TogglePublicInput) {
-  return createClient(options).togglePublic(input);
-}
-
-/**
- * Small helpers for UI code.
- */
-export function getRootFolders(folders: FolderRecord[]): FolderRecord[] {
-  return folders.filter((f) => !f.parentId);
-}
-
-export function getChildFolders(folders: FolderRecord[], parentId: string | null | undefined): FolderRecord[] {
-  const pid = parentId ?? undefined;
-  return folders.filter((f) => (f.parentId ?? undefined) === pid);
-}
-
-export function sortFolders(folders: FolderRecord[]): FolderRecord[] {
-  return [...folders].sort((a, b) => {
-    const af = a.favorite ? 1 : 0;
-    const bf = b.favorite ? 1 : 0;
-    if (af !== bf) return bf - af;
-    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+function json(data: any, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
   });
 }
 
-export function buildFolderTree(folders: FolderRecord[]) {
-  const map = new Map<string, FolderRecord & { children: ReturnType<typeof buildFolderTree> }>();
-
-  for (const folder of folders) {
-    map.set(folder.folderId, { ...folder, children: [] });
-  }
-
-  const roots: Array<FolderRecord & { children: ReturnType<typeof buildFolderTree> }> = [];
-
-  for (const folder of map.values()) {
-    if (folder.parentId && map.has(folder.parentId)) {
-      map.get(folder.parentId)!.children.push(folder);
-    } else {
-      roots.push(folder);
-    }
-  }
-
-  const sortNodes = (nodes: typeof roots) => {
-    nodes.sort((a, b) => {
-      const af = a.favorite ? 1 : 0;
-      const bf = b.favorite ? 1 : 0;
-      if (af !== bf) return bf - af;
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-    });
-    for (const node of nodes) sortNodes(node.children);
-  };
-
-  sortNodes(roots);
-  return roots;
+function findFolder(registry: Record<string, any>, name: string, parentId: any) {
+  return Object.values(registry).find(
+    (r: any) =>
+      r &&
+      r._type === 'folder' &&
+      r.name === name &&
+      (r.parentId ?? null) === (parentId ?? null)
+  );
 }
+
+export const GET: RequestHandler = async ({ request, url, cookies }) => {
+  const headerKey =
+    request.headers.get('x-api-key') ??
+    url.searchParams.get('api_key') ??
+    '';
+
+  let key = headerKey.trim();
+
+  if (!key) {
+    try {
+      const session = cookies.get('session');
+      if (session) {
+        const { decrypt } = await import('$lib/crypto');
+        key = decrypt(session) ?? '';
+      }
+    } catch {}
+  }
+
+  const rec = await getRecordByApiKey(key);
+  if (!rec) return json({ error: 'Forbidden' }, 403);
+
+  const registry = await readRegistry();
+
+  const folders = Object.values(registry).filter(
+    (r: any) => r?._type === 'folder'
+  );
+
+  return json({ folders });
+};
+
+export const POST: RequestHandler = async ({ request }) => {
+  try {
+    const rec = await getRecordByApiKey(apiKey(request));
+    if (!rec) return json({ error: 'Forbidden' }, 403);
+
+    const body = await request.json().catch(() => null);
+    if (!body) return json({ error: 'Invalid JSON' }, 400);
+
+    const registry = await readRegistry();
+
+    // ---------------------------
+    // CREATE (IDEMPOTENT FIX 🔥)
+    // ---------------------------
+    if (body.action === 'create') {
+      const name = (body.name ?? 'New Folder').trim();
+      const parentId = body.parentId ?? null;
+
+      const existing = findFolder(registry, name, parentId);
+
+      if (existing) {
+        return json({ folder: existing, created: false });
+      }
+
+      const folderId = 'folder:' + crypto.randomUUID();
+
+      const folder: FolderRecord = {
+        _type: 'folder',
+        folderId,
+        name,
+        createdAt: new Date().toISOString(),
+        parentId
+      };
+
+      registry[folderId] = folder;
+      await writeRegistry(registry);
+
+      return json({ folder, created: true });
+    }
+
+    // ---------------------------
+    // RENAME
+    // ---------------------------
+    if (body.action === 'rename') {
+      const f = registry[body.folderId];
+      if (!f?._type) return json({ error: 'Not found' }, 404);
+
+      f.name = body.name?.trim() || f.name;
+
+      if ('parentId' in body) {
+        f.parentId = body.parentId ?? null;
+      }
+
+      await writeRegistry(registry);
+      return json({ ok: true });
+    }
+
+    // ---------------------------
+    // DELETE (SAFE CLEANUP FIX 🧹)
+    // ---------------------------
+    if (body.action === 'delete') {
+      const f = registry[body.folderId];
+      if (!f?._type) return json({ error: 'Not found' }, 404);
+
+      const parent = f.parentId ?? null;
+
+      for (const [key, item] of Object.entries(registry)) {
+        const v: any = item;
+
+        // reparent folders
+        if (v?._type === 'folder' && v.parentId === body.folderId) {
+          v.parentId = parent;
+        }
+
+        // reattach files safely
+        if (!v?._type && v.folderId === body.folderId) {
+          v.folderId = parent;
+        }
+      }
+
+      delete registry[body.folderId];
+
+      await writeRegistry(registry);
+      return json({ ok: true });
+    }
+
+    // ---------------------------
+    // MOVE FILE
+    // ---------------------------
+    if (body.action === 'moveFile') {
+      const file = registry[body.metaFileId];
+      if (!file) return json({ error: 'Not found' }, 404);
+
+      if (body.folderId) file.folderId = body.folderId;
+      else delete file.folderId;
+
+      await writeRegistry(registry);
+      return json({ ok: true });
+    }
+
+    // ---------------------------
+    // FAVORITE
+    // ---------------------------
+    if (body.action === 'toggleFavorite') {
+      const f = registry[body.folderId];
+      if (!f?._type) return json({ error: 'Not found' }, 404);
+
+      f.favorite = !f.favorite;
+
+      await writeRegistry(registry);
+      return json({ ok: true, favorite: f.favorite });
+    }
+
+    // ---------------------------
+    // DUPLICATE FILE
+    // ---------------------------
+    if (body.action === 'duplicate') {
+      const file = registry[body.metaFileId];
+      if (!file || file._type === 'folder') {
+        return json({ error: 'Not found' }, 404);
+      }
+
+      const registryKey = 'dup:' + crypto.randomUUID();
+
+      registry[registryKey] = {
+        ...file,
+        fileName: body.newName || `${file.fileName} (copy)`,
+        time: new Date().toISOString(),
+        favorite: false
+      };
+
+      await writeRegistry(registry);
+      return json({ file: registry[registryKey] });
+    }
+
+    // ---------------------------
+    // TOGGLE PUBLIC (SAFE RECURSIVE FIX 🌐)
+    // ---------------------------
+    if (body.action === 'togglePublic') {
+      const f = registry[body.folderId];
+      if (!f?._type) return json({ error: 'Not found' }, 404);
+
+      const newState = !f.public;
+      f.public = newState;
+
+      const visit = (fid: string, state: boolean) => {
+        for (const item of Object.values(registry)) {
+          const v: any = item;
+
+          if (v?._type === 'folder' && v.parentId === fid) {
+            v.public = state;
+            visit(v.folderId, state);
+          }
+
+          if (!v?._type && v.folderId === fid) {
+            v.public = state;
+          }
+        }
+      };
+
+      if (body.recursive) {
+        visit(body.folderId, newState);
+      }
+
+      await writeRegistry(registry);
+      return json({ ok: true, public: newState });
+    }
+
+    return json({ error: 'Unknown action' }, 400);
+  } catch (e: any) {
+    console.error('folderOps crash:', e);
+    return json({ error: e?.message || 'Internal error' }, 500);
+  }
+};
