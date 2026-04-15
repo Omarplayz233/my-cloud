@@ -14,13 +14,37 @@ function mimeFromName(name: string): string {
     case 'mp3': return 'audio/mpeg';
     case 'wav': return 'audio/wav';
     case 'pdf': return 'application/pdf';
+    case 'txt': return 'text/plain; charset=utf-8';
+    case 'md': return 'text/markdown; charset=utf-8';
+    case 'json': return 'application/json; charset=utf-8';
+    case 'html': return 'text/html; charset=utf-8';
+    case 'css': return 'text/css; charset=utf-8';
+    case 'js': return 'text/javascript; charset=utf-8';
+    case 'ts': return 'text/plain; charset=utf-8';
+    case 'xml': return 'application/xml; charset=utf-8';
     default: return 'application/octet-stream';
   }
 }
 
+function normalizePath(input: string): string {
+  return decodeURIComponent(input)
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\/{2,}/g, '/');
+}
+
+function splitPublicPrefix(path: string): { raw: boolean; path: string } {
+  const clean = normalizePath(path);
+  if (clean.startsWith('raw/')) {
+    return { raw: true, path: clean.slice(4) };
+  }
+  return { raw: false, path: clean };
+}
+
 async function getTgUrl(fileId: string): Promise<string | null> {
   try {
-    const r = await fetch(`${TELE_API}/getFile?file_id=${fileId}`);
+    const r = await fetch(`${TELE_API}/getFile?file_id=${encodeURIComponent(fileId)}`);
     const j = await r.json();
     if (!j?.ok) return null;
     return `https://api.telegram.org/file/bot${BOT_TOKEN}/${j.result.file_path}`;
@@ -36,116 +60,138 @@ function parseRange(range: string | null, size: number) {
   let start = startStr ? Number(startStr) : 0;
   let end = endStr ? Number(endStr) : size - 1;
 
-  if (isNaN(start)) start = 0;
-  if (isNaN(end)) end = size - 1;
+  if (Number.isNaN(start)) start = 0;
+  if (Number.isNaN(end)) end = size - 1;
+  if (start < 0) start = 0;
+  if (end >= size) end = size - 1;
 
   if (start > end || start >= size) return null;
-
   return { start, end };
 }
 
-export const GET: RequestHandler = async ({ params, request }) => {
-  const { filename } = params;
+async function fetchMetaJson(metaFileId: string): Promise<any> {
+  const metaRes = await fetch(`${TELE_API}/getFile?file_id=${encodeURIComponent(metaFileId)}`);
+  const metaJson = await metaRes.json();
+  if (!metaJson?.ok) throw new Error('Meta file lookup failed');
 
-  const folder = await getPublicFolderByPath(filename);
-  if (folder) {
+  const metaUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${metaJson.result.file_path}`;
+  const res = await fetch(metaUrl);
+  if (!res.ok) throw new Error(`Meta download failed: ${res.status}`);
+
+  return await res.json();
+}
+
+function contentDisposition(fileName: string, download: boolean) {
+  const mode = download ? 'attachment' : 'inline';
+  return `${mode}; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+export const GET: RequestHandler = async ({ params, url, request }) => {
+  const wanted = splitPublicPrefix(params.filename ?? '');
+  const publicPath = wanted.path;
+
+  if (!publicPath) return new Response('Not found', { status: 404 });
+
+  const download = url.searchParams.get('download') === 'true' || url.searchParams.get('download') === '1';
+
+  const folder = await getPublicFolderByPath(publicPath);
+  if (folder && !wanted.raw) {
     return new Response(null, {
       status: 302,
-      headers: { Location: `/public/folder/${filename}` }
+      headers: { Location: `/public/folder/${publicPath}` }
     });
   }
 
-  const file = await getPublicFileByPath(filename);
-  if (!file) return new Response('Not found', { status: 404 });
+  const file = await getPublicFileByPath(publicPath);
+  if (!file) {
+    return new Response('Not found', { status: 404 });
+  }
 
-  const metaRes = await fetch(`${TELE_API}/getFile?file_id=${file.metaFileId}`);
-  const metaJson = await metaRes.json();
-  if (!metaJson?.ok) return new Response('Meta fail', { status: 500 });
+  let meta: any;
+  try {
+    meta = await fetchMetaJson(file.metaFileId);
+  } catch (e) {
+    console.error('public file meta error:', e);
+    return new Response('Meta fail', { status: 500 });
+  }
 
-  const metaUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${metaJson.result.file_path}`;
-  const meta = await (await fetch(metaUrl)).json();
-
-  const type = file.type || mimeFromName(file.fileName);
-  const size = meta.totalBytes || file.totalBytes || 0;
-
+  const type = file.type || meta?.type || mimeFromName(file.fileName);
+  const size = Number(meta?.totalBytes ?? file.totalBytes ?? 0);
   const rangeHeader = request.headers.get('range');
-  const range = parseRange(rangeHeader, size);
+  const range = size > 0 ? parseRange(rangeHeader, size) : null;
 
   const headers = new Headers({
     'Content-Type': type,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-store',
+    'Content-Disposition': contentDisposition(file.fileName, download)
   });
 
-  // ---------------- NON-CHUNKED ----------------
-  if (!meta.chunked) {
-    const tgUrl = await getTgUrl(meta.telegramFileId || file.telegramFileId);
+  // Non-chunked
+  if (!meta?.chunked) {
+    const tgUrl = await getTgUrl(meta?.telegramFileId || file.telegramFileId || file.metaFileId);
     if (!tgUrl) return new Response('No file url', { status: 500 });
 
     const res = await fetch(tgUrl, {
-      headers: range
-        ? { Range: `bytes=${range.start}-${range.end}` }
-        : {}
+      headers: range ? { Range: `bytes=${range.start}-${range.end}` } : {}
     });
 
-    if (range && res.status === 206) {
-      headers.set('Content-Range', res.headers.get('Content-Range') || '');
+    if (!res.ok && res.status !== 206) {
+      return new Response(`Upstream failed: ${res.status}`, { status: 502 });
+    }
+
+    if (range) {
+      headers.set('Content-Range', res.headers.get('Content-Range') || `bytes ${range.start}-${range.end}/${size}`);
       headers.set('Content-Length', String(range.end - range.start + 1));
       return new Response(res.body, { status: 206, headers });
     }
 
-    if (size) headers.set('Content-Length', String(size));
+    if (size > 0) headers.set('Content-Length', String(size));
     return new Response(res.body, { status: 200, headers });
   }
 
-  // ---------------- CHUNKED SEEKING ----------------
-  const chunks = [...meta.chunks].sort((a: any, b: any) => a.index - b.index);
+  // Chunked
+  const chunks = [...(meta?.chunks ?? [])].sort((a: any, b: any) => a.index - b.index);
 
-  const stream = new ReadableStream({
+  const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
         let offset = 0;
 
         for (const chunk of chunks) {
-          const chunkSize = chunk.size || 0;
+          const chunkSize = Number(chunk.size ?? 0);
           const start = offset;
           const end = offset + chunkSize - 1;
-
           offset += chunkSize;
 
-          // skip chunks outside range
           if (range && end < range.start) continue;
           if (range && start > range.end) break;
 
           const url = await getTgUrl(chunk.file_id);
-          if (!url) throw new Error('chunk url fail');
+          if (!url) throw new Error('Chunk url fail');
+
+          const overlapStart = range ? Math.max(0, range.start - start) : 0;
+          const overlapEnd = range ? Math.min(chunkSize - 1, range.end - start) : chunkSize - 1;
 
           const res = await fetch(url, {
-            headers: range
-              ? {
-                  Range: `bytes=${
-                    Math.max(0, (range.start ?? 0) - start)
-                  }-${Math.min(
-                    chunkSize - 1,
-                    (range.end ?? chunkSize - 1) - start
-                  )}`
-                }
-              : {}
+            headers: range ? { Range: `bytes=${overlapStart}-${overlapEnd}` } : {}
           });
 
-          if (!res.body) throw new Error('chunk body missing');
+          if (!res.ok || !res.body) {
+            throw new Error(`Chunk fetch failed: ${res.status}`);
+          }
 
           const reader = res.body.getReader();
-
           while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            controller.enqueue(value);
+            if (value) controller.enqueue(value);
           }
         }
 
         controller.close();
       } catch (e) {
+        console.error('public stream error:', e);
         controller.error(e);
       }
     }
@@ -157,6 +203,6 @@ export const GET: RequestHandler = async ({ params, request }) => {
     return new Response(stream, { status: 206, headers });
   }
 
-  if (size) headers.set('Content-Length', String(size));
+  if (size > 0) headers.set('Content-Length', String(size));
   return new Response(stream, { status: 200, headers });
 };
