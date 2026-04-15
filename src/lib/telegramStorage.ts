@@ -1,6 +1,5 @@
 // src/lib/telegramStorage.ts
 import axios from 'axios';
-// removed: import FormData from 'form-data';
 import fs from 'fs';
 import crypto from 'crypto';
 import path from 'path';
@@ -112,20 +111,14 @@ async function updateLocalCache(patch: Partial<CacheData>) {
 async function uploadFileStream(tmpPath: string, filename?: string): Promise<{ message_id: number; file_id: string }> {
   if (!TELE_API) throw new Error('Telegram not configured');
 
-  // Read file bytes
   const buffer = await fs.promises.readFile(tmpPath);
 
-  // Use native FormData + Blob (Node 18+ provides global FormData and Blob)
   const form = new FormData();
   form.append('chat_id', CHAT_ID);
 
-  // Create a Blob from the Buffer and append it with a filename
-  // TypeScript may complain about Blob constructor typing in some setups; this works at runtime in Node 18+.
-  // If you get TS errors, ensure "dom" libs are available or cast:
   const blob = new Blob([buffer]);
   form.append('document', blob, filename || path.basename(tmpPath));
 
-  // Use fetch to POST the multipart form. Do NOT set Content-Type; fetch sets the boundary automatically.
   const res = await fetch(`${TELE_API}/sendDocument`, {
     method: 'POST',
     body: form
@@ -156,22 +149,21 @@ async function pinChatMessage(message_id: number): Promise<void> {
 
 async function readIndexFile(): Promise<IndexFile> {
   if (!TELE_API) throw new Error('Telegram not configured');
-  
+
   const pinned = await getPinnedMessage();
   const pinnedMsgId = pinned?.message_id || 0;
-  
+
   const local = await getLocalCache();
-  // If Telegram returns an older pinned message due to API caching, use our local newer one
   if (local.indexFile && local.pinned_message_id && local.pinned_message_id >= pinnedMsgId) {
     return local.indexFile;
   }
 
   if (!pinned?.document?.file_id) return { keys: {} };
+
   try {
     const text = await downloadFileId(pinned.document.file_id, 'text');
     const parsed = JSON.parse(text);
-    
-    // Support old flat format migration
+
     const result = (parsed && !parsed.keys) ? { keys: parsed } : (parsed as IndexFile);
     await updateLocalCache({ pinned_message_id: pinnedMsgId, indexFile: result });
     return result;
@@ -198,7 +190,7 @@ export async function getRecordByApiKey(apiKey: string): Promise<ApiKeyRecord | 
 export async function generateApiKeyForDiscordId(discordId: string, username?: string): Promise<ApiKeyRecord> {
   const index = await readIndex();
   if (index[discordId]) return index[discordId];
-  // First time this allowed ID logs in — create and persist their API key
+
   const apiKey = crypto.randomUUID();
   const rec: ApiKeyRecord = { apiKey, discordId, username, createdAt: new Date().toISOString() };
   index[discordId] = rec;
@@ -215,12 +207,14 @@ export async function saveRecord(rec: ApiKeyRecord): Promise<void> {
 export async function revokeApiKey(apiKey: string): Promise<boolean> {
   const index = await readIndex();
   let changed = false;
+
   for (const d of Object.keys(index)) {
     if (index[d].apiKey === apiKey) {
       delete index[d];
       changed = true;
     }
   }
+
   if (changed) await writeIndex(index);
   return changed;
 }
@@ -232,14 +226,17 @@ async function writeIndex(index: Record<string, ApiKeyRecord>, extra?: Partial<I
 
   const tmp = `/tmp/telegram_index_${Date.now()}.json`;
   await fs.promises.writeFile(tmp, JSON.stringify(payload, null, 2), 'utf8');
+
   const { message_id } = await uploadFileStream(tmp, `index_${Date.now()}.json`);
   await pinChatMessage(message_id);
   await updateLocalCache({ pinned_message_id: message_id, indexFile: payload });
-  await fs.promises.unlink(tmp).catch(() => { });
+
+  await fs.promises.unlink(tmp).catch(() => {});
+
   if (oldMsgId && oldMsgId !== message_id) {
     await axios.post(`${TELE_API}/deleteMessage`, null, {
       params: { chat_id: CHAT_ID, message_id: oldMsgId }
-    }).catch(() => { });
+    }).catch(() => {});
   }
 }
 
@@ -248,25 +245,25 @@ async function writeIndex(index: Record<string, ApiKeyRecord>, extra?: Partial<I
 async function getRegistryPtr(): Promise<{ file_id: string; message_id: number } | null> {
   const idx = await readIndexFile();
   const reportedMsgId = idx.registryMessageId || 0;
-  
+
   const local = await getLocalCache();
-  // Bypass Telegram caching delays if we wrote a newer registry locally
   if (local.registryPtr && local.registryPtr.message_id >= reportedMsgId) {
     return local.registryPtr;
   }
-  
+
   if (idx.registryFileId && typeof idx.registryMessageId === 'number') {
     const ptr = { file_id: idx.registryFileId, message_id: idx.registryMessageId };
     await updateLocalCache({ registryPtr: ptr });
     return ptr;
   }
+
   return null;
 }
 
 export async function readRegistry(): Promise<Record<string, FileRecord>> {
   const ptr = await getRegistryPtr();
   if (!ptr) return {};
-  
+
   const local = await getLocalCache();
   if (local.registryData && local.registryPtr?.file_id === ptr.file_id) {
     return local.registryData;
@@ -290,24 +287,22 @@ export async function writeRegistry(registry: Record<string, any>): Promise<void
 
   const tmp = `/tmp/_registry_${Date.now()}.json`;
   await fs.promises.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
-  const { file_id, message_id } = await uploadFileStream(tmp, `_registry_${Date.now()}.json`);
-  await fs.promises.unlink(tmp).catch(() => { });
 
-  // Cache the new registry immediately
-  await updateLocalCache({ 
-    registryData: registry, 
-    registryPtr: { file_id, message_id } 
+  const { file_id, message_id } = await uploadFileStream(tmp, `_registry_${Date.now()}.json`);
+  await fs.promises.unlink(tmp).catch(() => {});
+
+  await updateLocalCache({
+    registryData: registry,
+    registryPtr: { file_id, message_id }
   });
 
-  // Persist registryFileId + registryMessageId into pinned index (writeIndex deletes old index)
   const currentKeys = await readIndex();
   await writeIndex(currentKeys, { registryFileId: file_id, registryMessageId: message_id });
 
-  // Delete old registry message
   if (oldPtr?.message_id && oldPtr.message_id > 0 && oldPtr.message_id !== message_id) {
     await axios.post(`${TELE_API}/deleteMessage`, null, {
       params: { chat_id: CHAT_ID, message_id: oldPtr.message_id }
-    }).catch(() => { });
+    }).catch(() => {});
   }
 }
 
@@ -331,50 +326,6 @@ export async function setFilePublicity(metaFileId: string, isPublic: boolean): P
   registry[metaFileId].public = isPublic;
   await writeRegistry(registry);
   return true;
-}
-
-export async function getPublicFileByPath(fullPath: string): Promise<FileRecord | null> {
-  const registry = await readRegistry() ?? {};
-  const all = Object.values(registry);
-
-  function isFolderPublic(folderId: string | undefined): boolean {
-    let id = folderId;
-    while (id) {
-      const f = registry[id];
-      if (!f) break;
-      if (f.public) return true;
-      id = f.parentId;
-    }
-    return false;
-  }
-
-  for (const f of all) {
-    if (f._type || !f.fileName) continue;
-    if (!f.public && !isFolderPublic(f.folderId)) continue;
-
-    // Reconstruct full path
-    let currentPath = f.fileName;
-    let parentId = f.folderId;
-    while (parentId) {
-      const parent = registry[parentId];
-      if (!parent || parent._type !== 'folder') break;
-      currentPath = parent.name + '/' + currentPath;
-      parentId = parent.parentId;
-    }
-
-    if (currentPath === fullPath) return f;
-  }
-
-  return null;
-}
-
-/** @deprecated use getPublicFileByPath */
-export async function getPublicFileByName(fileName: string): Promise<FileRecord | null> {
-  const registry = await readRegistry() ?? {};
-  const matches = Object.values(registry).filter(f => f.public && f.fileName === fileName);
-  if (!matches.length) return null;
-  // Most recent wins on collision
-  return matches.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())[0];
 }
 
 export async function renameFile(metaFileId: string, newName: string): Promise<boolean> {
@@ -406,19 +357,20 @@ export async function deleteFile(metaFileId: string): Promise<boolean> {
   const rec = registry[metaFileId];
   if (!rec) return false;
 
-  // Delete actual Telegram messages (file/chunks + meta)
   const toDelete = [
     ...(rec.chunkMessageIds && rec.chunkMessageIds.length > 0 ? rec.chunkMessageIds : [rec.telegramMessageId]),
     rec.metaMessageId
   ].filter(id => id > 0);
-  await Promise.all(toDelete.map(message_id =>
-    axios.post(`${TELE_API}/deleteMessage`, null, {
-      params: { chat_id: CHAT_ID, message_id }
-    }).then(r => {
-      if (!r.data?.ok) console.error('deleteMessage failed:', message_id, r.data);
-      else console.log('deleteMessage ok:', message_id);
-    }).catch(e => console.error('deleteMessage error:', message_id, e?.response?.data || e?.message))
-  ));
+
+  await Promise.all(
+    toDelete.map(message_id =>
+      axios.post(`${TELE_API}/deleteMessage`, null, {
+        params: { chat_id: CHAT_ID, message_id }
+      }).then(r => {
+        if (!r.data?.ok) console.error('deleteMessage failed:', message_id, r.data);
+      }).catch(e => console.error('deleteMessage error:', message_id, e?.response?.data || e?.message))
+    )
+  );
 
   delete registry[metaFileId];
   await writeRegistry(registry);
@@ -433,10 +385,7 @@ export async function uploadFileToTelegram(tmpPath: string, filename?: string): 
 
 /** @deprecated use uploadFileToTelegram */
 export async function uploadFileToTelegramAndPin(tmpPath: string, filename?: string): Promise<{ message_id: number; file_id: string }> {
-  // if you want to pin, call pinChatMessage after upload
-  const res = await uploadFileStream(tmpPath, filename);
-  // not pinning by default to preserve original behaviour (rename if you intend to pin)
-  return res;
+  return uploadFileStream(tmpPath, filename);
 }
 
 /* -------------------- File download -------------------- */
@@ -450,7 +399,7 @@ export async function downloadFileFromTelegram(fileId: string): Promise<{ data: 
 
 export async function uploadBytesToTelegram(
   bytes: Buffer | Uint8Array,
-  filename = "chunk.bin"
+  filename = 'chunk.bin'
 ): Promise<{ message_id: number; file_id: string }> {
   if (!bytes || bytes.length === 0) {
     throw new Error(`Cannot upload empty file: ${filename}. The file has 0 bytes.`);
@@ -467,10 +416,10 @@ export async function uploadBytesToTelegram(
 
 export async function uploadJsonToTelegram(
   data: any,
-  filename = "meta.json"
+  filename = 'meta.json'
 ): Promise<{ message_id: number; file_id: string }> {
   const tmp = `/tmp/_meta_${Date.now()}.json`;
-  await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
+  await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
 
   try {
     return await uploadFileStream(tmp, filename);
@@ -479,55 +428,174 @@ export async function uploadJsonToTelegram(
   }
 }
 
-/* -------------------- Public folder helper -------------------- */
+/* -------------------- Public path helpers -------------------- */
+
+function normalizePublicPath(input: string): string {
+  return decodeURIComponent(input)
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\/{2,}/g, '/')
+    .trim();
+}
+
+function normalizeId(id: string | undefined | null): string | null {
+  return id ? id : null;
+}
+
+function walkFolderPath(folder: any, registry: Record<string, any>): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  let cur: any = folder;
+
+  while (cur && cur._type === 'folder') {
+    if (seen.has(cur.folderId)) break;
+    seen.add(cur.folderId);
+
+    parts.unshift(cur.name);
+    const parentId = normalizeId(cur.parentId);
+    if (!parentId) break;
+    cur = registry[parentId];
+  }
+
+  return parts.join('/');
+}
+
+function walkFilePath(file: FileRecord, registry: Record<string, any>): string {
+  const seen = new Set<string>();
+  const parts = [file.fileName];
+  let folderId = normalizeId(file.folderId);
+
+  while (folderId) {
+    if (seen.has(folderId)) break;
+    seen.add(folderId);
+
+    const folder = registry[folderId];
+    if (!folder || folder._type !== 'folder') break;
+
+    parts.unshift(folder.name);
+    folderId = normalizeId(folder.parentId);
+  }
+
+  return parts.join('/');
+}
+
+function isFolderPublic(folder: any, registry: Record<string, any>): boolean {
+  if (!folder || folder._type !== 'folder') return false;
+  if (folder.public) return true;
+
+  let parentId = normalizeId(folder.parentId);
+  const seen = new Set<string>();
+
+  while (parentId) {
+    if (seen.has(parentId)) break;
+    seen.add(parentId);
+
+    const parent = registry[parentId];
+    if (!parent || parent._type !== 'folder') break;
+    if (parent.public) return true;
+
+    parentId = normalizeId(parent.parentId);
+  }
+
+  return false;
+}
+
+function isFilePublic(file: FileRecord, registry: Record<string, any>): boolean {
+  if (!file) return false;
+  if (file.public) return true;
+
+  let folderId = normalizeId(file.folderId);
+  const seen = new Set<string>();
+
+  while (folderId) {
+    if (seen.has(folderId)) break;
+    seen.add(folderId);
+
+    const folder = registry[folderId];
+    if (!folder || folder._type !== 'folder') break;
+    if (folder.public) return true;
+
+    folderId = normalizeId(folder.parentId);
+  }
+
+  return false;
+}
+
+export async function getPublicFileByPath(fullPath: string): Promise<FileRecord | null> {
+  const registry = (await readRegistry()) as Record<string, any>;
+  const targetPath = normalizePublicPath(fullPath);
+  if (!targetPath) return null;
+
+  const allFiles = Object.values(registry).filter((r: any) => !r?._type) as FileRecord[];
+
+  const exact = allFiles.filter((file) => {
+    if (!isFilePublic(file, registry)) return false;
+    return normalizePublicPath(walkFilePath(file, registry)) === targetPath;
+  });
+
+  if (exact.length > 0) {
+    exact.sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
+    return exact[0];
+  }
+
+  const parts = targetPath.split('/').filter(Boolean);
+  if (parts.length >= 1) {
+    const fileName = parts[parts.length - 1];
+
+    const fallback = allFiles.filter((file) => {
+      if (!isFilePublic(file, registry)) return false;
+      if (file.fileName !== fileName) return false;
+
+      const current = normalizePublicPath(walkFilePath(file, registry));
+      return current === targetPath || current.endsWith(`/${fileName}`);
+    });
+
+    if (fallback.length > 0) {
+      fallback.sort((a, b) => new Date(b.time || 0).getTime() - new Date(a.time || 0).getTime());
+      return fallback[0];
+    }
+  }
+
+  return null;
+}
+
+/** @deprecated use getPublicFileByPath */
+export async function getPublicFileByName(fileName: string): Promise<FileRecord | null> {
+  const registry = await readRegistry() ?? {};
+  const matches = Object.values(registry).filter(f => f.public && f.fileName === fileName);
+  if (!matches.length) return null;
+  return matches.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())[0];
+}
 
 export async function getPublicFolderByPath(folderPath: string): Promise<{
   folder: any;
   files: FileRecord[];
   subfolders: any[];
 } | null> {
-  const registry = await readRegistry() as Record<string, any>;
+  const registry = (await readRegistry()) as Record<string, any>;
+  const targetPath = normalizePublicPath(folderPath);
+  if (!targetPath) return null;
+
   const all = Object.values(registry);
-  const allFolders = all.filter(r => r._type === 'folder');
-  const allFiles   = all.filter(r => !r._type);
+  const allFolders = all.filter((r: any) => r?._type === 'folder');
 
-  // Check if a folder is publicly accessible (itself or any ancestor is public)
-  function isFolderPublic(folder: any): boolean {
-    if (folder.public) return true;
-    let parentId = folder.parentId;
-    while (parentId) {
-      const parent = registry[parentId];
-      if (!parent) break;
-      if (parent.public) return true;
-      parentId = parent.parentId;
-    }
-    return false;
-  }
-
-  // Reconstruct full path for a folder
-  function folderFullPath(folder: any): string {
-    let p = folder.name;
-    let parentId = folder.parentId;
-    while (parentId) {
-      const parent = allFolders.find(f => f.folderId === parentId);
-      if (!parent) break;
-      p = parent.name + '/' + p;
-      parentId = parent.parentId;
-    }
-    return p;
-  }
-
-  const matchingFolders = allFolders.filter(folder => isFolderPublic(folder) && folderFullPath(folder) === folderPath);
+  const matchingFolders = allFolders.filter((folder: any) => {
+    if (!isFolderPublic(folder, registry)) return false;
+    return normalizePublicPath(walkFolderPath(folder, registry)) === targetPath;
+  });
 
   if (matchingFolders.length === 0) return null;
 
-  const targetFolderIds = matchingFolders.map(f => f.folderId);
-  const files = allFiles.filter(f => f.folderId && targetFolderIds.includes(f.folderId));
-  const subfolders = allFolders.filter(f => f.parentId && targetFolderIds.includes(f.parentId) && isFolderPublic(f));
-  
-  // Return the first matched folder as the primary metadata provider
   matchingFolders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   const folder = matchingFolders[0];
+
+  const files = (all.filter((r: any) => !r?._type) as FileRecord[])
+    .filter((f) => normalizeId(f.folderId) === folder.folderId && isFilePublic(f, registry));
+
+  const subfolders = allFolders.filter((f: any) =>
+    normalizeId(f.parentId) === folder.folderId && isFolderPublic(f, registry)
+  );
 
   return { folder, files, subfolders };
 }
@@ -545,6 +613,8 @@ export default {
   listFiles,
   setFilePublicity,
   getPublicFileByName,
+  getPublicFileByPath,
+  getPublicFolderByPath,
   deleteFile,
   renameFile,
   setFileTags,
