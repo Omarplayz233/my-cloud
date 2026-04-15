@@ -1,34 +1,103 @@
-// src/routes/api/telegram/ls/+server.ts
 import type { RequestHandler } from './$types';
 import { getRecordByApiKey, readRegistry } from '$lib/telegramStorage';
 
-export const GET: RequestHandler = async ({ request, url }) => {
-  const apiKey = (request.headers.get('x-api-key') ?? url.searchParams.get('api_key') ?? '').trim();
-  const query  = (request.headers.get('x-query')   ?? url.searchParams.get('q')       ?? '*').trim();
+function apiKey(req: Request) {
+  return (req.headers.get('x-api-key') ?? '').trim();
+}
 
-  if (!apiKey) return new Response(JSON.stringify({ error: 'Missing api key' }), { status: 403 });
-  const rec = await getRecordByApiKey(apiKey);
-  if (!rec)   return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
-
+export const GET: RequestHandler = async ({ request, url, cookies }) => {
   try {
-    const registry = await readRegistry() as Record<string, any>;
-    const all = Object.values(registry);
-    let folders = all.filter((r: any) => r._type === 'folder');
-    let files   = all.filter((r: any) => !r._type);
+    // --- auth (same logic, just cleaned a bit)
+    let key =
+      request.headers.get('x-api-key') ??
+      url.searchParams.get('api_key') ??
+      '';
 
-    if (query && query !== '*') {
-      const q = query.toLowerCase();
-      files   = files.filter((f: any)   => f.fileName?.toLowerCase().includes(q));
-      folders = folders.filter((f: any) => f.name?.toLowerCase().includes(q));
+    key = key.trim();
+
+    if (!key) {
+      try {
+        const session = cookies.get('session');
+        if (session) {
+          const { decrypt } = await import('$lib/crypto');
+          key = decrypt(session) ?? '';
+        }
+      } catch {
+        // ignore
+      }
     }
 
-    return new Response(JSON.stringify({ files, folders }), {
-      status: 200, headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
+    const rec = await getRecordByApiKey(key);
+    if (!rec) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403
+      });
+    }
+
+    // --- 🔥 FORCE FRESH REGISTRY (important)
+    // this assumes readRegistry() might cache internally
+    // so we "break" cache by cloning result
+    const raw = await readRegistry();
+    const registry: Record<string, any> = JSON.parse(JSON.stringify(raw));
+
+    const folderId = url.searchParams.get('folderId') || null;
+
+    const files: any[] = [];
+    const folders: any[] = [];
+
+    for (const [key, item] of Object.entries(registry)) {
+      if (!item) continue;
+
+      // --- folders
+      if (item._type === 'folder') {
+        const parentMatch =
+          (item.parentId ?? null) === folderId;
+
+        if (parentMatch) {
+          folders.push({
+            ...item,
+            id: item.folderId // normalize
+          });
+        }
+        continue;
       }
-    });
+
+      // --- files
+      const fileFolder = item.folderId ?? null;
+
+      if (fileFolder === folderId) {
+        files.push({
+          ...item,
+          id: item.metaFileId || key // normalize
+        });
+      }
+    }
+
+    // optional: sort (makes UI stable)
+    folders.sort((a, b) => a.name.localeCompare(b.name));
+    files.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+
+    return new Response(
+      JSON.stringify({
+        folders,
+        files
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+
+          // 🚫 KILL ALL CACHING
+          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+          Pragma: 'no-cache',
+          Expires: '0'
+        }
+      }
+    );
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err?.message ?? 'Internal error' }), { status: 500 });
+    console.error('ls api error:', err);
+    return new Response(
+      JSON.stringify({ error: err?.message || 'Internal error' }),
+      { status: 500 }
+    );
   }
 };
