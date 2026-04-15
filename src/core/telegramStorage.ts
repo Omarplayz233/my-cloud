@@ -5,7 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import path from 'path';
 import os from 'os';
-import { repairRegistry, findFolderBySignature } from '$lib/server/registryRepair';
+import { repairRegistry, findFolderBySignature } from './registryRepair.ts';
 
 export type ApiKeyRecord = {
   apiKey: string;
