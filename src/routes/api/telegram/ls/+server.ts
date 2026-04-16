@@ -13,7 +13,6 @@ function normalizeFolderId(id: string | null | undefined) {
 
 export const GET: RequestHandler = async ({ request, url, cookies }) => {
   try {
-    // --- auth
     let key =
       request.headers.get('x-api-key') ??
       url.searchParams.get('api_key') ??
@@ -38,10 +37,8 @@ export const GET: RequestHandler = async ({ request, url, cookies }) => {
       });
     }
 
-    // --- registry (fresh clone to avoid mutation weirdness)
     const raw = await readRegistry();
     const registry: Record<string, any> = JSON.parse(JSON.stringify(raw));
-
     const folderId = normalizeFolderId(url.searchParams.get('folderId'));
 
     const files: any[] = [];
@@ -50,34 +47,27 @@ export const GET: RequestHandler = async ({ request, url, cookies }) => {
     for (const [key, item] of Object.entries(registry)) {
       if (!item) continue;
 
-      // ─────────────────────────────
-      // FOLDERS
-      // ─────────────────────────────
       if (item._type === 'folder') {
         const itemParent = normalizeFolderId(item.parentId);
-
         const isRootLevel = folderId === null && itemParent === null;
         const isChildMatch = folderId !== null && itemParent === folderId;
 
-        if (isRootLevel || isChildMatch) {
+        // When no folderId is supplied, return the whole tree so the client can
+        // diff and render the current folder correctly without stale partial data.
+        if (folderId === null || isRootLevel || isChildMatch) {
           folders.push({
             ...item,
             id: item.folderId
           });
         }
-
         continue;
       }
 
-      // ─────────────────────────────
-      // FILES
-      // ─────────────────────────────
       const fileFolder = normalizeFolderId(item.folderId);
-
       const isRootFiles = folderId === null && fileFolder === null;
       const isChildFiles = folderId !== null && fileFolder === folderId;
 
-      if (isRootFiles || isChildFiles) {
+      if (folderId === null || isRootFiles || isChildFiles) {
         files.push({
           ...item,
           id: item.metaFileId || key
@@ -93,8 +83,6 @@ export const GET: RequestHandler = async ({ request, url, cookies }) => {
       {
         headers: {
           'Content-Type': 'application/json',
-
-          // kill caching fully
           'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
           Pragma: 'no-cache',
           Expires: '0'
