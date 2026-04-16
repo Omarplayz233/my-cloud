@@ -17,6 +17,17 @@ function apiKey(req: Request) {
   return (req.headers.get('x-api-key') ?? '').trim();
 }
 
+function normalizeFolderId(id: string | null | undefined) {
+  if (!id) return null;
+  if (id === 'root') return null;
+  if (id.startsWith('tmp:')) return null;
+  return id;
+}
+
+function sameFolder(a: any, b: any): boolean {
+  return (a?.name ?? '') === (b?.name ?? '') && (a?.parentId ?? null) === (b?.parentId ?? null);
+}
+
 export const GET: RequestHandler = async ({ request, url, cookies }) => {
   const headerKey = (request.headers.get('x-api-key') ?? url.searchParams.get('api_key') ?? '').trim();
   let key = headerKey;
@@ -35,7 +46,6 @@ export const GET: RequestHandler = async ({ request, url, cookies }) => {
   if (!rec) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
 
   const registry = await readRegistry();
-
   const folders = Object.values(registry).filter((r: any) => r?._type === 'folder');
 
   return new Response(JSON.stringify({ folders }), {
@@ -48,18 +58,29 @@ export const POST: RequestHandler = async ({ request }) => {
   if (!rec) return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
 
   const body = await request.json();
-  const registry = await readRegistry() as Record<string, any>;
+  const registry = (await readRegistry()) as Record<string, any>;
 
-  // CREATE
   if (body.action === 'create') {
-    const folderId = 'folder:' + crypto.randomUUID();
+    const name = (body.name?.trim() || 'New Folder');
+    const parentId = normalizeFolderId(body.parentId);
 
+    if (parentId && !registry[parentId]) {
+      return Response.json({ error: 'Parent not found' }, { status: 409 });
+    }
+
+    for (const [key, item] of Object.entries(registry)) {
+      if (item?._type === 'folder' && sameFolder(item, { name, parentId })) {
+        return Response.json({ folder: { ...item, id: key }, reused: true });
+      }
+    }
+
+    const folderId = 'folder:' + crypto.randomUUID();
     const folder: FolderRecord = {
       _type: 'folder',
       folderId,
-      name: body.name?.trim() || 'New Folder',
+      name,
       createdAt: new Date().toISOString(),
-      ...(body.parentId ? { parentId: body.parentId } : {})
+      ...(parentId ? { parentId } : {})
     };
 
     registry[folderId] = folder;
@@ -68,25 +89,33 @@ export const POST: RequestHandler = async ({ request }) => {
     return Response.json({ folder });
   }
 
-  // RENAME / MOVE
   if (body.action === 'rename') {
-    const f = registry[body.folderId];
+    const folderId = normalizeFolderId(body.folderId);
+    if (!folderId) return Response.json({ error: 'Invalid folderId' }, { status: 400 });
+
+    const f = registry[folderId];
     if (!f?._type) return Response.json({ error: 'Not found' }, { status: 404 });
 
     f.name = body.name?.trim() || f.name;
 
     if ('parentId' in body) {
-      if (body.parentId) f.parentId = body.parentId;
+      const parentId = normalizeFolderId(body.parentId);
+      if (parentId && !registry[parentId]) {
+        return Response.json({ error: 'Parent not found' }, { status: 409 });
+      }
+      if (parentId) f.parentId = parentId;
       else delete f.parentId;
     }
 
     await writeRegistry(registry);
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, folder: f });
   }
 
-  // DELETE (FIXED CORE LOGIC)
   if (body.action === 'delete') {
-    const f = registry[body.folderId];
+    const folderId = normalizeFolderId(body.folderId);
+    if (!folderId) return Response.json({ error: 'Invalid folderId' }, { status: 400 });
+
+    const f = registry[folderId];
     if (!f?._type) return Response.json({ error: 'Not found' }, { status: 404 });
 
     const newParent = f.parentId ?? undefined;
@@ -94,39 +123,43 @@ export const POST: RequestHandler = async ({ request }) => {
     for (const key of Object.keys(registry)) {
       const item = registry[key];
 
-      // move folders up one level
-      if (item?._type === 'folder' && item.parentId === body.folderId) {
+      if (item?._type === 'folder' && item.parentId === folderId) {
         item.parentId = newParent;
       }
 
-      // move files up one level safely
-      if (!item?._type && item.folderId === body.folderId) {
+      if (!item?._type && item.folderId === folderId) {
         if (newParent) item.folderId = newParent;
         else delete item.folderId;
       }
     }
 
-    delete registry[body.folderId];
+    delete registry[folderId];
     await writeRegistry(registry);
 
     return Response.json({ ok: true });
   }
 
-  // MOVE FILE
   if (body.action === 'moveFile') {
     const file = registry[body.metaFileId];
     if (!file) return Response.json({ error: 'Not found' }, { status: 404 });
 
-    if (body.folderId) file.folderId = body.folderId;
+    const targetFolderId = normalizeFolderId(body.folderId);
+    if (targetFolderId && !registry[targetFolderId]) {
+      return Response.json({ error: 'Folder not found' }, { status: 409 });
+    }
+
+    if (targetFolderId) file.folderId = targetFolderId;
     else delete file.folderId;
 
     await writeRegistry(registry);
     return Response.json({ ok: true });
   }
 
-  // FAVORITE
   if (body.action === 'toggleFavorite') {
-    const f = registry[body.folderId];
+    const folderId = normalizeFolderId(body.folderId);
+    if (!folderId) return Response.json({ error: 'Invalid folderId' }, { status: 400 });
+
+    const f = registry[folderId];
     if (!f?._type) return Response.json({ error: 'Not found' }, { status: 404 });
 
     f.favorite = !f.favorite;
@@ -135,7 +168,6 @@ export const POST: RequestHandler = async ({ request }) => {
     return Response.json({ ok: true, favorite: f.favorite });
   }
 
-  // DUPLICATE
   if (body.action === 'duplicate') {
     const file = registry[body.metaFileId];
     if (!file || file._type === 'folder') {
@@ -155,9 +187,11 @@ export const POST: RequestHandler = async ({ request }) => {
     return Response.json({ ok: true, file: registry[registryKey] });
   }
 
-  // PUBLIC TOGGLE
   if (body.action === 'togglePublic') {
-    const f = registry[body.folderId];
+    const folderId = normalizeFolderId(body.folderId);
+    if (!folderId) return Response.json({ error: 'Invalid folderId' }, { status: 400 });
+
+    const f = registry[folderId];
     if (!f?._type) return Response.json({ error: 'Not found' }, { status: 404 });
 
     const isPublic = !f.public;
@@ -174,7 +208,7 @@ export const POST: RequestHandler = async ({ request }) => {
           }
         }
       };
-      walk(body.folderId);
+      walk(folderId);
     }
 
     await writeRegistry(registry);
