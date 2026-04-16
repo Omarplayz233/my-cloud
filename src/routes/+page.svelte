@@ -20,6 +20,7 @@
   type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault';
   let activeTab = $state<Tab>('files');
   let editorFile = $state<{ metaFileId: string; fileName: string } | null>(null);
+  let filesRefreshKey = $state(0);
 
   // Stats passed up from Files tab
   let fileCount    = $state(0);
@@ -63,10 +64,32 @@
     applyTheme();
   }
 
+  function bumpFilesRefresh() {
+    filesRefreshKey += 1;
+  }
+
   onMount(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark' || saved === 'system') theme = saved as any;
     applyTheme();
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') bumpFilesRefresh();
+    };
+    const onFocus = () => bumpFilesRefresh();
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+
+    const refreshTimer = window.setInterval(() => {
+      if (activeTab === 'files') bumpFilesRefresh();
+    }, 30_000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(refreshTimer);
+    };
   });
 
   $effect(() => { const _ = theme; applyTheme(); });
@@ -106,16 +129,18 @@
 
     <main class="main">
       {#if activeTab === 'files'}
-        <Files
-          {user}
-          {apiKey}
-          {encryptedApiKey}
-          {theme}
-          onfileCountChange={(n) => fileCount = n}
-          onfolderCountChange={(n) => folderCount = n}
-          onstorageChange={(b) => storageBytes = b}
-          oneditimage={(f) => { editorFile = f; activeTab = 'editor'; }}
-        />
+        {#key filesRefreshKey}
+          <Files
+            {user}
+            {apiKey}
+            {encryptedApiKey}
+            {theme}
+            onfileCountChange={(n) => fileCount = n}
+            onfolderCountChange={(n) => folderCount = n}
+            onstorageChange={(b) => storageBytes = b}
+            oneditimage={(f) => { editorFile = f; activeTab = 'editor'; }}
+          />
+        {/key}
       {:else if activeTab === 'generators'}
         <Generators />
       {:else if activeTab === 'downloader'}
