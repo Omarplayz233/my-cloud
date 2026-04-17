@@ -441,15 +441,29 @@
     }
   }
 
-  // Background poll — silent refresh every 30s to catch external changes
+  // Background poll — silent refresh every 10s to catch external changes
   function startBackgroundSync() {
     if (syncTimer) clearInterval(syncTimer);
     syncTimer = setInterval(() => {
       if (document.visibilityState === 'visible' && !uploading) {
         loadFiles(searchQuery, { silent: true });
       }
-    }, 30_000);
+    }, 10_000);
   }
+
+  // Refresh immediately when tab becomes visible (user switches back)
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible' && !uploading) {
+      loadFiles(searchQuery, { silent: true });
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  });
 
   // Optimistic helpers — update local state immediately, sync in background
   function optimisticUpdateFile(metaFileId: string, patch: Partial<FileRecord>) {
