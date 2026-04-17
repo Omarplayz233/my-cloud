@@ -704,7 +704,6 @@
 
   function triggerFolderDelete(id: string) {
     folderToDeleteId = id;
-    selectedIds = new Set();
     showDeleteConfirm = true;
   }
 
@@ -1180,7 +1179,9 @@
 
   $effect(() => {
     if (user && apiKey) {
-      loadFiles();
+      if (files.length === 0 && folders.length === 0) {
+        loadFiles();
+      }
       startBackgroundSync();
     }
     return () => { if (syncTimer) clearInterval(syncTimer); };
