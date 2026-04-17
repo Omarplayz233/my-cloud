@@ -8,6 +8,7 @@ function apiKey(req: Request) {
 function normalizeFolderId(id: string | null | undefined) {
   if (!id) return null;
   if (id === 'root' || id === 'null' || id === 'undefined') return null;
+  if (id.startsWith('tmp:')) return null;
   return id;
 }
 

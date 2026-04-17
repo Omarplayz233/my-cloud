@@ -104,6 +104,27 @@ function subfoldersOf(folderId: string | null, registry: Record<string, any>) {
     .map(([key, v]: any) => ({ ...v, _regKey: key }));
 }
 
+function uniqueName(baseName: string, existingNames: Set<string>): string {
+  if (!existingNames.has(baseName)) return baseName;
+  let counter = 1;
+  while (existingNames.has(`${baseName} (${counter})`)) counter++;
+  return `${baseName} (${counter})`;
+}
+
+function uniqueFileName(baseName: string, existingNames: Set<string>): string {
+  if (!existingNames.has(baseName)) return baseName;
+  const dotIdx = baseName.lastIndexOf('.');
+  const ext = dotIdx > 0 ? baseName.slice(dotIdx) : '';
+  const nameWithoutExt = dotIdx > 0 ? baseName.slice(0, dotIdx) : baseName;
+  let counter = 1;
+  let candidate = `${nameWithoutExt} (${counter})${ext}`;
+  while (existingNames.has(candidate)) {
+    counter++;
+    candidate = `${nameWithoutExt} (${counter})${ext}`;
+  }
+  return candidate;
+}
+
 // ── XML helpers ───────────────────────────────────────────────────────────────
 function xmlEscape(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -533,11 +554,22 @@ async function handleHead(url: URL, registry: Record<string, any>) {
 }
 
 async function handlePut(request: Request, url: URL, registry: Record<string, any>, apiKey: string) {
-  const { folderPath, fileName } = parsePath(url);
-  if (!fileName) return new Response('Cannot PUT a directory', { status: 405 });
+  const { folderPath, fileName: originalFileName } = parsePath(url);
+  if (!originalFileName) return new Response('Cannot PUT a directory', { status: 405 });
 
   const folder = findFolder(folderPath, registry);
   if (!folder && folderPath) return new Response('Parent folder not found', { status: 409 });
+
+  const folderId = folder?._regKey ?? null;
+
+  const existingFileNames = new Set<string>();
+  for (const [k, v] of Object.entries(registry)) {
+    if (!(v as any)._type && ((v as any).folderId ?? null) === folderId) {
+      existingFileNames.add((v as any).fileName);
+    }
+  }
+
+  const fileName = uniqueFileName(originalFileName, existingFileNames);
 
   const ct = request.headers.get('Content-Type') ?? 'application/octet-stream';
   const CHUNK = TG_SAFE_CHUNK_BYTES;
@@ -592,15 +624,8 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   const rec: any = {
     metaFileId, fileName, type: ct,
     totalBytes: total, time: meta.time,
-    ...(folder?._regKey ? { folderId: folder._regKey } : {}),
+    ...(folderId ? { folderId } : {}),
   };
-  // Remove old entry with same name in same folder
-  for (const [k, v] of Object.entries(registry)) {
-    if (!(v as any)._type && (v as any).fileName === fileName &&
-      ((v as any).folderId ?? null) === (folder?._regKey ?? null)) {
-      delete registry[k];
-    }
-  }
   registry[metaFileId] = rec;
   await writeRegistry(registry);
 
@@ -668,9 +693,20 @@ async function handleMkcol(url: URL, registry: Record<string, any>) {
   const parent = findFolder(parentPath, registry);
   if (!parent && parentPath) return new Response('Parent not found', { status: 409 });
 
+  const parentId = parent?._regKey ?? null;
+
+  const existingNames = new Set<string>();
+  for (const [key, item] of Object.entries(registry)) {
+    if ((item as any)._type === 'folder' && ((item as any).parentId ?? null) === parentId) {
+      existingNames.add((item as any).name);
+    }
+  }
+
+  const finalName = uniqueName(name, existingNames);
+
   const folderId = 'folder:' + crypto.randomUUID();
   registry[folderId] = {
-    _type: 'folder', folderId, name,
+    _type: 'folder', folderId, name: finalName,
     createdAt: new Date().toISOString(),
     ...(parent?._regKey ? { parentId: parent._regKey } : {}),
   };
