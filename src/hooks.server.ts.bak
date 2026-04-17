@@ -22,17 +22,25 @@ const TELE_API = () => `https://api.telegram.org/bot${BOT_TOKEN()}`;
 
 const DAV_METHODS = new Set(['PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'OPTIONS']);
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-async function davAuth(request: Request): Promise<{ rec: any; apiKey: string } | null> {
-  const auth = request.headers.get('Authorization') ?? '';
-  if (!auth.startsWith('Basic ')) return null;
-  const decoded = atob(auth.slice(6));
-  const colon = decoded.indexOf(':');
-  if (colon === -1) return null;
-  const apiKey = decoded.slice(colon + 1).trim(); // password = api key
-  const rec = await getRecordByApiKey(apiKey);
-  if (!rec) return null;
-  return { rec, apiKey };
+// Cache control headers to prevent any caching
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+  'Expires': '0'
+};
+
+function davResponse(body: BodyInit | null, init: ResponseInit = {}): Response {
+  return new Response(body, {
+    ...init,
+    headers: { ...NO_CACHE_HEADERS, ...init.headers }
+  });
+}
+
+function unauth() {
+  return davResponse('Unauthorized', {
+    status: 401,
+    headers: { 'WWW-Authenticate': 'Basic realm="omar\'s cloud :3"' },
+  });
 }
 
 function unauth() {
@@ -379,7 +387,7 @@ async function streamFileAll(file: any): Promise<ReadableStream<Uint8Array>> {
 
 // ── WebDAV handlers ───────────────────────────────────────────────────────────
 async function handleOptions() {
-  return new Response(null, {
+  return davResponse(null, {
     status: 200,
     headers: {
       'DAV': '1, 2',
@@ -445,19 +453,9 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
     const folder = findFolder(folderPath, registry);
     const folderId = folder?._regKey ?? null;
     const file = filesInFolder(folderId, registry).find((f: any) => f.fileName === fileName);
-    if (!file) return new Response('Not Found', { status: 404 });
-    responses.push(
-      propResponse(
-        encodeDavPathSegments(pathname),
-        false,
-        (file as any).fileName,
-        (file as any).totalBytes ?? 0,
-        (file as any).time ?? new Date().toISOString()
-      )
-    );
-  }
+if (!file) return davResponse('Not Found', { status: 404 });
 
-  return new Response(multistatus(responses), {
+    return davResponse(multistatus(responses), {
     status: 207,
     headers: { 'Content-Type': 'application/xml; charset=utf-8', 'DAV': '1, 2' },
   });
@@ -465,7 +463,7 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
 
 async function handleGet(request: Request, url: URL, registry: Record<string, any>) {
   const { folderPath, fileName } = parsePath(url);
-  if (!fileName) return new Response('Is a directory', { status: 400 });
+  if (!fileName) return davResponse('Is a directory', { status: 400 });
 
   const folder = findFolder(folderPath, registry);
   const folderId = folder?._regKey ?? null;
@@ -490,7 +488,7 @@ async function handleGet(request: Request, url: URL, registry: Record<string, an
   if (rangeHeader && totalBytes > 0) {
     const range = parseRange(rangeHeader, totalBytes);
     if (!range) {
-      return new Response('Requested Range Not Satisfiable', {
+      return davResponse('Requested Range Not Satisfiable', {
         status: 416,
         headers: { 'Content-Range': `bytes */${totalBytes}` }
       });
@@ -498,7 +496,7 @@ async function handleGet(request: Request, url: URL, registry: Record<string, an
 
     const { start, end } = range;
     const body = await streamFileRange(file, start, end);
-    return new Response(body, {
+    return davResponse(body, {
       status: 206,
       headers: {
         'Content-Type': contentType,
@@ -511,7 +509,7 @@ async function handleGet(request: Request, url: URL, registry: Record<string, an
   }
 
   const body = await streamFileAll(file);
-  return new Response(body, {
+  return davResponse(body, {
     status: 200,
     headers: {
       'Content-Type': contentType,
@@ -524,12 +522,12 @@ async function handleGet(request: Request, url: URL, registry: Record<string, an
 
 async function handleHead(url: URL, registry: Record<string, any>) {
   const { folderPath, fileName } = parsePath(url);
-  if (!fileName) return new Response('Is a directory', { status: 400 });
+  if (!fileName) return davResponse('Is a directory', { status: 400 });
 
   const folder = findFolder(folderPath, registry);
   const folderId = folder?._regKey ?? null;
   const file = filesInFolder(folderId, registry).find((f: any) => f.fileName === fileName) as any;
-  if (!file) return new Response('Not Found', { status: 404 });
+  if (!file) return davResponse('Not Found', { status: 404 });
 
   let totalBytes = Number(file.totalBytes ?? 0);
   let contentType = file.type ?? 'application/octet-stream';
@@ -542,7 +540,7 @@ async function handleHead(url: URL, registry: Record<string, any>) {
       // Best-effort
     }
   }
-  return new Response(null, {
+  return davResponse(null, {
     status: 200,
     headers: {
       'Content-Type': contentType,
@@ -555,10 +553,10 @@ async function handleHead(url: URL, registry: Record<string, any>) {
 
 async function handlePut(request: Request, url: URL, registry: Record<string, any>, apiKey: string) {
   const { folderPath, fileName: originalFileName } = parsePath(url);
-  if (!originalFileName) return new Response('Cannot PUT a directory', { status: 405 });
+  if (!originalFileName) return davResponse('Cannot PUT a directory', { status: 405 });
 
   const folder = findFolder(folderPath, registry);
-  if (!folder && folderPath) return new Response('Parent folder not found', { status: 409 });
+  if (!folder && folderPath) return davResponse('Parent folder not found', { status: 409 });
 
   const folderId = folder?._regKey ?? null;
 
@@ -592,7 +590,7 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   let i = 0;
 
   // Stream upload: do not buffer the entire file in memory.
-  if (!request.body) return new Response('Missing request body', { status: 400 });
+  if (!request.body) return davResponse('Missing request body', { status: 400 });
   const reader = request.body.getReader();
   let pending = new Uint8Array(0);
 
@@ -643,7 +641,7 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   registry[metaFileId] = rec;
   await writeRegistry(registry);
 
-  return new Response(null, { status: 201 });
+  return davResponse(null, { status: 201 });
 }
 
 async function handleDelete(url: URL, registry: Record<string, any>) {
@@ -662,11 +660,10 @@ async function handleDelete(url: URL, registry: Record<string, any>) {
         break;
       }
     }
-    if (!deleted) return new Response('Not Found', { status: 404 });
+if (!deleted) return davResponse('Not Found', { status: 404 });
   } else if (folderPath) {
-    // Delete folder recursively
     const folder = findFolder(folderPath, registry);
-    if (!folder) return new Response('Not Found', { status: 404 });
+    if (!folder) return davResponse('Not Found', { status: 404 });
     const targetId = folder._regKey ?? folder.folderId;
 
     // Gather all descendant folder IDs
@@ -691,21 +688,11 @@ async function handleDelete(url: URL, registry: Record<string, any>) {
       if (v._type === 'folder' && folderIds.has(v.folderId)) delete registry[k];
     }
   } else {
-    return new Response('Cannot delete root', { status: 405 });
-  }
+return davResponse('Cannot delete root', { status: 405 });
 
-  await writeRegistry(registry);
-  return new Response(null, { status: 204 });
-}
+  if (!folderPath) return davResponse('Cannot create root', { status: 405 });
 
-async function handleMkcol(url: URL, registry: Record<string, any>) {
-  const { folderPath } = parsePath(url);
-  if (!folderPath) return new Response('Cannot create root', { status: 405 });
-  const parts = folderPath.split('/');
-  const name = parts.pop()!;
-  const parentPath = parts.join('/');
-  const parent = findFolder(parentPath, registry);
-  if (!parent && parentPath) return new Response('Parent not found', { status: 409 });
+  if (!parent && parentPath) return davResponse('Parent not found', { status: 409 });
 
   const parentId = parent?._regKey ?? null;
 
@@ -734,7 +721,7 @@ async function handleMkcol(url: URL, registry: Record<string, any>) {
     ...(parent?._regKey ? { parentId: parent._regKey } : {}),
   };
   await writeRegistry(registry);
-  return new Response(null, { status: 201 });
+  return davResponse(null, { status: 201 });
 }
 
 function destFromHeader(request: Request): { folderPath: string; fileName: string | null } {
@@ -757,46 +744,19 @@ async function handleMove(request: Request, url: URL, registry: Record<string, a
       const v = registry[k];
       return !v._type && v.fileName === src.fileName && (v.folderId ?? null) === srcFolderId;
     });
-    if (!fileKey) return new Response('Not Found', { status: 404 });
+if (!fileKey) return davResponse('Not Found', { status: 404 });
 
-    const destFolder = findFolder(dest.folderPath, registry);
-    if (dest.folderPath && !destFolder) return new Response('Destination folder not found', { status: 409 });
+    if (dest.folderPath && !destFolder) return davResponse('Destination folder not found', { status: 409 });
 
-    registry[fileKey].fileName = dest.fileName ?? src.fileName;
-    if (destFolder?._regKey) registry[fileKey].folderId = destFolder._regKey;
-    else delete registry[fileKey].folderId;
-  } else if (src.folderPath) {
-    const folder = findFolder(src.folderPath, registry);
-    if (!folder?._regKey) return new Response('Not Found', { status: 404 });
+    if (!folder?._regKey) return davResponse('Not Found', { status: 404 });
 
-    const newName = dest.fileName ?? dest.folderPath.split('/').pop() ?? folder.name;
-    const destParentPath = dest.folderPath || '';
-    const destParent = destParentPath ? findFolder(destParentPath, registry) : null;
+    return davResponse('Cannot move root', { status: 405 });
 
-    registry[folder._regKey].name = newName;
-    if (destParent?._regKey) registry[folder._regKey].parentId = destParent._regKey;
-    else if (!destParentPath) delete registry[folder._regKey].parentId;
-  } else {
-    return new Response('Cannot move root', { status: 405 });
-  }
+  if (!src.fileName) return davResponse('Folder copy not supported', { status: 405 });
 
-  await writeRegistry(registry);
-  return new Response(null, { status: 201 });
-}
+  if (!file) return davResponse('Not Found', { status: 404 });
 
-async function handleCopy(request: Request, url: URL, registry: Record<string, any>) {
-  const src = parsePath(url);
-  const dest = destFromHeader(request);
-
-  if (!src.fileName) return new Response('Folder copy not supported', { status: 405 });
-
-  const srcFolder = findFolder(src.folderPath, registry);
-  const file = filesInFolder(srcFolder?._regKey ?? null, registry)
-    .find((f: any) => f.fileName === src.fileName) as any;
-  if (!file) return new Response('Not Found', { status: 404 });
-
-  const destFolder = findFolder(dest.folderPath, registry);
-  if (dest.folderPath && !destFolder) return new Response('Destination not found', { status: 409 });
+  if (dest.folderPath && !destFolder) return davResponse('Destination not found', { status: 409 });
 
   // Copy = new registry entry pointing to same metaFileId (same Telegram files)
   const newKey: string = 'copy:' + crypto.randomUUID();
@@ -809,7 +769,7 @@ async function handleCopy(request: Request, url: URL, registry: Record<string, a
   if (!destFolder?.folderId) delete registry[newKey].folderId;
 
   await writeRegistry(registry);
-  return new Response(null, { status: 201 });
+  return davResponse(null, { status: 201 });
 }
 
 async function handleLock(url: URL) {
@@ -876,8 +836,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (method === 'MOVE') return handleMove(request, url, registry);
   if (method === 'COPY') return handleCopy(request, url, registry);
   if (method === 'LOCK') return handleLock(url);
-  if (method === 'UNLOCK') return new Response(null, { status: 204 });
-  if (method === 'PROPPATCH') return new Response(multistatus([]), { status: 207, headers: { 'Content-Type': 'application/xml' } });
+  if (method === 'UNLOCK') return davResponse(null, { status: 204 });
+  if (method === 'PROPPATCH') return davResponse(multistatus([]), { status: 207, headers: { 'Content-Type': 'application/xml' } });
 
-  return new Response('Not Implemented', { status: 501 });
+  return davResponse('Not Implemented', { status: 501 });
 };
