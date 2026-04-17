@@ -20,7 +20,11 @@
   type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault';
   let activeTab = $state<Tab>('files');
   let editorFile = $state<{ metaFileId: string; fileName: string } | null>(null);
-  let filesRefreshKey = $state(0);
+  let filesRefreshNonce = $state(0);
+
+  function bumpRefreshNonce() {
+    filesRefreshNonce += 1;
+  }
 
   // Stats passed up from Files tab
   let fileCount    = $state(0);
@@ -64,25 +68,21 @@
     applyTheme();
   }
 
-  function bumpFilesRefresh() {
-    filesRefreshKey += 1;
-  }
-
   onMount(() => {
     const saved = localStorage.getItem('theme');
     if (saved === 'light' || saved === 'dark' || saved === 'system') theme = saved as any;
     applyTheme();
 
     const onVisible = () => {
-      if (document.visibilityState === 'visible') bumpFilesRefresh();
+      if (document.visibilityState === 'visible') bumpRefreshNonce();
     };
-    const onFocus = () => bumpFilesRefresh();
+    const onFocus = () => bumpRefreshNonce();
 
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onFocus);
 
     const refreshTimer = window.setInterval(() => {
-      if (activeTab === 'files') bumpFilesRefresh();
+      if (activeTab === 'files') bumpRefreshNonce();
     }, 30_000);
 
     return () => {
@@ -129,18 +129,17 @@
 
     <main class="main">
       {#if activeTab === 'files'}
-        {#key filesRefreshKey}
-          <Files
-            {user}
-            {apiKey}
-            {encryptedApiKey}
-            {theme}
-            onfileCountChange={(n) => fileCount = n}
-            onfolderCountChange={(n) => folderCount = n}
-            onstorageChange={(b) => storageBytes = b}
-            oneditimage={(f) => { editorFile = f; activeTab = 'editor'; }}
-          />
-        {/key}
+        <Files
+          {user}
+          {apiKey}
+          {encryptedApiKey}
+          {theme}
+          refreshNonce={filesRefreshNonce}
+          onfileCountChange={(n) => fileCount = n}
+          onfolderCountChange={(n) => folderCount = n}
+          onstorageChange={(b) => storageBytes = b}
+          oneditimage={(f) => { editorFile = f; activeTab = 'editor'; }}
+        />
       {:else if activeTab === 'generators'}
         <Generators />
       {:else if activeTab === 'downloader'}

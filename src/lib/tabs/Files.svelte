@@ -81,6 +81,7 @@
     apiKey,
     encryptedApiKey,
     theme,
+    refreshNonce,
     onfileCountChange,
     onfolderCountChange,
     onstorageChange,
@@ -90,6 +91,7 @@
     apiKey: string;
     encryptedApiKey: string;
     theme: 'system' | 'light' | 'dark';
+    refreshNonce?: number;
     onfileCountChange: (n: number) => void;
     onfolderCountChange: (n: number) => void;
     onstorageChange: (b: number) => void;
@@ -450,20 +452,6 @@
       }
     }, 5_000);
   }
-
-  // Refresh immediately when tab becomes visible (user switches back)
-  function handleVisibilityChange() {
-    if (document.visibilityState === 'visible' && !uploading) {
-      loadFiles(searchQuery, { silent: true });
-    }
-  }
-
-  onMount(() => {
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  });
 
   // Optimistic helpers — update local state immediately, sync in background
   function optimisticUpdateFile(metaFileId: string, patch: Partial<FileRecord>) {
@@ -1217,6 +1205,14 @@
         node.select();
       }, 0);
     }
+
+  // Watch for refreshNonce changes from parent (silent background sync)
+  $effect(() => {
+    const nonce = refreshNonce;
+    if (nonce !== undefined && nonce > 0 && hasLoadedOnce) {
+      loadFiles(searchQuery, { silent: true });
+    }
+  });
 
   $effect(() => {
     if (user && apiKey) {
