@@ -441,14 +441,14 @@
     }
   }
 
-  // Background poll — silent refresh every 10s to catch external changes
+  // Background poll — every 5s to catch external changes
   function startBackgroundSync() {
     if (syncTimer) clearInterval(syncTimer);
     syncTimer = setInterval(() => {
       if (document.visibilityState === 'visible' && !uploading) {
         loadFiles(searchQuery, { silent: true });
       }
-    }, 10_000);
+    }, 5_000);
   }
 
   // Refresh immediately when tab becomes visible (user switches back)
