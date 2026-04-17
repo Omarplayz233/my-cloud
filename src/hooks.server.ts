@@ -562,14 +562,28 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
 
   const folderId = folder?._regKey ?? null;
 
-  const existingFileNames = new Set<string>();
-  for (const [k, v] of Object.entries(registry)) {
-    if (!(v as any)._type && ((v as any).folderId ?? null) === folderId) {
-      existingFileNames.add((v as any).fileName);
+  // Keep checking until we find an unused name (handles rapid parallel uploads)
+  let finalName = originalFileName;
+  let counter = 1;
+  while (true) {
+    let exists = false;
+    for (const [k, v] of Object.entries(registry)) {
+      if (!(v as any)._type && 
+          ((v as any).fileName ?? '').toLowerCase() === finalName.toLowerCase() &&
+          ((v as any).folderId ?? null) === folderId) {
+        exists = true;
+        break;
+      }
     }
+    if (!exists) break;
+    
+    // Extract extension for proper renaming
+    const dotIdx = originalFileName.lastIndexOf('.');
+    const ext = dotIdx > 0 ? originalFileName.slice(dotIdx) : '';
+    const nameWithoutExt = dotIdx > 0 ? originalFileName.slice(0, dotIdx) : originalFileName;
+    finalName = `${nameWithoutExt} (${counter})${ext}`;
+    counter++;
   }
-
-  const fileName = uniqueFileName(originalFileName, existingFileNames);
 
   const ct = request.headers.get('Content-Type') ?? 'application/octet-stream';
   const CHUNK = TG_SAFE_CHUNK_BYTES;
@@ -597,7 +611,7 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
     while (pending.length >= CHUNK) {
       const slice = pending.slice(0, CHUNK);
       pending = pending.slice(CHUNK);
-      const { file_id, message_id } = await uploadBytesToTelegram(slice, `${fileName}.chunk${i}`);
+      const { file_id, message_id } = await uploadBytesToTelegram(slice, `${finalName}.chunk${i}`);
       chunks.push({ index: i, file_id, message_id, size: slice.length });
       total += slice.length;
       i++;
@@ -607,22 +621,22 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   // Flush final partial chunk (including empty file => upload 0 bytes)
   if (pending.length > 0 || chunks.length === 0) {
     const slice = pending;
-    const { file_id, message_id } = await uploadBytesToTelegram(slice, `${fileName}.chunk${i}`);
+    const { file_id, message_id } = await uploadBytesToTelegram(slice, `${finalName}.chunk${i}`);
     chunks.push({ index: i, file_id, message_id, size: slice.length });
     total += slice.length;
   }
 
   const meta = {
-    fileName, type: ct, totalBytes: total,
+    fileName: finalName, type: ct, totalBytes: total,
     time: new Date().toISOString(),
     chunked: chunks.length > 1,
     ...(chunks.length > 1 ? { chunks } : { telegramFileId: chunks[0].file_id }),
   };
   const metaBuf = Buffer.from(JSON.stringify(meta));
-  const { file_id: metaFileId } = await uploadBytesToTelegram(metaBuf, `${fileName}.meta.json`);
+  const { file_id: metaFileId } = await uploadBytesToTelegram(metaBuf, `${finalName}.meta.json`);
 
   const rec: any = {
-    metaFileId, fileName, type: ct,
+    metaFileId, fileName: finalName, type: ct,
     totalBytes: total, time: meta.time,
     ...(folderId ? { folderId } : {}),
   };
@@ -695,14 +709,23 @@ async function handleMkcol(url: URL, registry: Record<string, any>) {
 
   const parentId = parent?._regKey ?? null;
 
-  const existingNames = new Set<string>();
-  for (const [key, item] of Object.entries(registry)) {
-    if ((item as any)._type === 'folder' && ((item as any).parentId ?? null) === parentId) {
-      existingNames.add((item as any).name);
+  // Keep checking until we find an unused name (handles rapid parallel requests)
+  let finalName = name;
+  let counter = 1;
+  while (true) {
+    let exists = false;
+    for (const [key, item] of Object.entries(registry)) {
+      if ((item as any)._type === 'folder' && 
+          ((item as any).name ?? '').toLowerCase() === finalName.toLowerCase() &&
+          ((item as any).parentId ?? null) === parentId) {
+        exists = true;
+        break;
+      }
     }
+    if (!exists) break;
+    finalName = `${name} (${counter})`;
+    counter++;
   }
-
-  const finalName = uniqueName(name, existingNames);
 
   const folderId = 'folder:' + crypto.randomUUID();
   registry[folderId] = {
