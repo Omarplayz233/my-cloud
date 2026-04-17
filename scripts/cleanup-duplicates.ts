@@ -44,8 +44,17 @@ interface FileRecord {
 }
 
 async function getPinnedMessage(): Promise<any> {
-  const res = await axios.get(`${TELE_API}/getPinnedMessage`, { params: { chat_id: CHAT_ID } });
-  return res.data.ok ? res.data.result : null;
+  try {
+    const res = await axios.get(`${TELE_API}/getChat`, { params: { chat_id: CHAT_ID } });
+    if (!res.data.ok) return null;
+    const chat = res.data.result;
+    if (chat.pinned_message) {
+      return chat.pinned_message;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function downloadFile(fileId: string): Promise<string> {
@@ -107,18 +116,33 @@ async function main() {
   const local = await getLocalCache();
   let indexFile: any = null;
 
+  // Try local cache first
+  if (local.indexFile) {
+    indexFile = local.indexFile;
+    console.log('Using cached index...');
+  }
+
+  // If pinned message has an index file, use it
   if (pinned?.document?.file_id) {
-    const text = await downloadFile(pinned.document.file_id);
-    indexFile = JSON.parse(text);
-    if (!indexFile.keys) {
-      indexFile = { keys: indexFile };
+    try {
+      const text = await downloadFile(pinned.document.file_id);
+      indexFile = JSON.parse(text);
+      if (!indexFile.keys) {
+        indexFile = { keys: indexFile };
+      }
+      console.log('Found pinned index file.');
+    } catch (e) {
+      console.log('Failed to download pinned index, using cache if available...');
     }
   }
 
   if (!indexFile?.registryFileId) {
-    console.log('No registry found.');
+    console.log('No registry found. Make sure TELEGRAM_BOT_TOKEN and TELEGRAM_BACKUP_CHAT_ID are set correctly.');
     return;
   }
+
+  console.log(`Registry file ID: ${indexFile.registryFileId}`);
+  console.log(`Registry message ID: ${indexFile.registryMessageId}`);
 
   console.log('Reading registry...');
   const registryText = await downloadFile(indexFile.registryFileId);
