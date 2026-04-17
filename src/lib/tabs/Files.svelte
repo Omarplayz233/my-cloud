@@ -5,6 +5,8 @@
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import { zipSync, strToU8 } from "fflate";
   import { onMount } from "svelte";
+  import { fade, fly } from "svelte/transition";
+  import { flip } from "svelte/animate";
   import {
     IconUpload,
     IconLayoutGrid,
@@ -115,9 +117,11 @@
 
   // Initial load = true (shows skeleton), background refresh = false (silent)
   let filesLoading  = $state(true);
+  let hasLoadedOnce = $state(false);  // track if we've loaded data at least once
   let syncing       = $state(false);  // subtle background indicator
   let lastSyncAt    = 0;
   let syncTimer: ReturnType<typeof setInterval> | null = null;
+  let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Upload queue — supports multiple concurrent uploads
   type UploadJob = { id: string; name: string; progress: number; done: boolean; error: string | null };
@@ -365,9 +369,25 @@
   // ── Smart sync ───────────────────────────────────────────────────────────────
   // First call shows skeleton; subsequent calls diff and patch silently.
   async function loadFiles(q = "", { silent = false } = {}) {
-    const isFirst = files.length === 0 && folders.length === 0;
-    if (isFirst && !silent) filesLoading = true;
-    else if (!isFirst) syncing = true;
+    // Clear any pending skeleton timer
+    if (skeletonTimer) {
+      clearTimeout(skeletonTimer);
+      skeletonTimer = null;
+    }
+
+    const isFirst = !hasLoadedOnce;
+
+    // Only show skeleton if this is first load and not silent
+    if (isFirst && !silent) {
+      skeletonTimer = setTimeout(() => {
+        if (files.length === 0 && folders.length === 0) {
+          filesLoading = true;
+        }
+      }, 150); // Small delay to prevent flash on fast responses
+    } else if (!isFirst) {
+      syncing = true;
+    }
+
     try {
       const res = await fetch(
         `${BASE}/api/telegram/ls?api_key=${apiKey}&_t=${Date.now()}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
@@ -377,6 +397,12 @@
       const d = await res.json();
       const newFiles:   FileRecord[]   = d.files   ?? [];
       const newFolders: FolderRecord[] = d.folders ?? [];
+
+      // Clear skeleton timer since we got data
+      if (skeletonTimer) {
+        clearTimeout(skeletonTimer);
+        skeletonTimer = null;
+      }
 
       // ── Diff files ─────────────────────────────────────────────────────────
       const newFileMap = new Map(newFiles.map(f => [f.metaFileId, f]));
@@ -407,6 +433,7 @@
       }
       if (fchanged) folders = newFolders;
 
+      hasLoadedOnce = true;
       lastSyncAt = Date.now();
     } catch { /* silent fail on background refresh */ } finally {
       filesLoading = false;
@@ -1498,7 +1525,10 @@
             <!-- Folder Rows -->
             {#each currentFolders as folder (folder.folderId)}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="file-row folder-row" 
+              <div class="file-row folder-row"
+                animate:flip={{ duration: 200 }}
+                in:fly={{ y: -10, duration: 150 }}
+                out:fade={{ duration: 100 }}
                 class:selected={selectedIds.has(folder.folderId)}
                 class:context-active={contextActiveId === folder.folderId}
                 oncontextmenu={(e) => openContextMenu(e, folder)}
@@ -1575,6 +1605,9 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="file-row"
+                animate:flip={{ duration: 200 }}
+                in:fly={{ y: -10, duration: 150 }}
+                out:fade={{ duration: 100 }}
                 oncontextmenu={(e) => openContextMenu(e, file)}
                 onclick={(e) => handleFileClick(e, file.metaFileId)}
                 class:selected={selectedIds.has(file.metaFileId)}
@@ -1740,6 +1773,9 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <div class="grid-card folder-card"
+                animate:flip={{ duration: 200 }}
+                in:fly={{ y: -10, duration: 150 }}
+                out:fade={{ duration: 100 }}
                 oncontextmenu={(e) => openContextMenu(e, folder)}
                 onclick={(e) => handleFileClick(e, folder.folderId)}
                 class:selected={selectedIds.has(folder.folderId)}
@@ -1804,6 +1840,9 @@
             {#each processedFiles as file (file.metaFileId)}
               <div
                 class="grid-card"
+                animate:flip={{ duration: 200 }}
+                in:fly={{ y: -10, duration: 150 }}
+                out:fade={{ duration: 100 }}
                 oncontextmenu={(e) => openContextMenu(e, file)}
                 onclick={(e) => handleFileClick(e, file.metaFileId)}
                 class:selected={selectedIds.has(file.metaFileId)}
