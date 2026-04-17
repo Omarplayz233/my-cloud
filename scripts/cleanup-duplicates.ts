@@ -75,18 +75,16 @@ async function getLocalCache(): Promise<any> {
 }
 
 async function uploadJson(data: any, filename: string): Promise<{ file_id: string; message_id: number }> {
-  const tmp = path.join(os.tmpdir(), `cleanup_${Date.now()}.json`);
-  await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
 
   const form = new FormData();
-  form.append('chat_id', CHAT_ID);
-  form.append('document', await fs.promises.readFile(tmp), filename);
+  form.append('chat_id', CHAT_ID!);
+  form.append('document', blob, filename);
 
   const res = await axios.post(`${TELE_API}/sendDocument`, form, {
     headers: form.getHeaders()
   });
-
-  await fs.promises.unlink(tmp).catch(() => {});
 
   if (!res.data.ok) throw new Error('sendDocument failed: ' + JSON.stringify(res.data));
   return {
