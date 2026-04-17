@@ -82,9 +82,7 @@ async function uploadJson(data: any, filename: string): Promise<{ file_id: strin
   form.append('chat_id', CHAT_ID!);
   form.append('document', blob, filename);
 
-  const res = await axios.post(`${TELE_API}/sendDocument`, form, {
-    headers: form.getHeaders()
-  });
+  const res = await axios.post(`${TELE_API}/sendDocument`, form);
 
   if (!res.data.ok) throw new Error('sendDocument failed: ' + JSON.stringify(res.data));
   return {
