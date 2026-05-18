@@ -20,9 +20,7 @@ import { TG_SAFE_CHUNK_BYTES } from '$lib/telegramLimits';
 const BOT_TOKEN = () => env.TELEGRAM_BOT_TOKEN!;
 const TELE_API = () => `https://api.telegram.org/bot${BOT_TOKEN()}`;
 
-// Keep this realistic for WebDAV clients, but still absurdly huge.
-// rclone can also be told the total size with --vfs-disk-space-total-size 1Y.
-const FAKE_TOTAL_BYTES = 9223372036854775807n; // max signed int64 for compatibility
+const FAKE_TOTAL_BYTES = 9223372036854775807n;
 
 const DAV_METHODS = new Set(['PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'OPTIONS']);
 
@@ -42,20 +40,37 @@ async function davAuth(request: Request): Promise<{ rec: any; apiKey: string } |
 function unauth() {
   return new Response('Unauthorized', {
     status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="omar\'s cloud :3"' },
+    headers: {
+      'WWW-Authenticate': 'Basic realm="omar\'s cloud :3"',
+      'Cache-Control': 'no-store, max-age=0, must-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0'
+    },
   });
+}
+
+function davHeaders(extra: Record<string, string> = {}) {
+  return {
+    DAV: '1, 2',
+    'MS-Author-Via': 'DAV',
+    'Cache-Control': 'no-store, max-age=0, must-revalidate',
+    Pragma: 'no-cache',
+    Expires: '0',
+    ...extra,
+  };
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 function parsePath(url: URL): { folderPath: string; fileName: string | null } {
   const parts = decodeURIComponent(url.pathname)
     .replace(/^\/+/, '')
-    .replace(/\/+$/, '')  // strip trailing slash
+    .replace(/\/+$/, '')
     .split('/')
     .filter(Boolean);
+
   if (!parts.length) return { folderPath: '', fileName: null };
+
   const last = parts[parts.length - 1];
-  // File only if last segment has an extension — never treat folder names as files
   const isFile = /\.[^./]+$/.test(last);
   if (isFile) {
     return { folderPath: parts.slice(0, -1).join('/'), fileName: last };
@@ -68,7 +83,6 @@ function folderFullPath(registryKey: string, registry: Record<string, any>): str
   const f = registry[registryKey];
   if (!f || f._type !== 'folder') return '';
   let path = f.name;
-  // Walk up via parentId — parentId is the registry key of the parent folder
   let pid = f.parentId;
   while (pid) {
     const p = registry[pid];
@@ -80,10 +94,9 @@ function folderFullPath(registryKey: string, registry: Record<string, any>): str
 }
 
 function findFolder(path: string, registry: Record<string, any>): any | null {
-  if (!path) return { folderId: null, name: 'root', _type: 'folder' }; // root
+  if (!path) return { folderId: null, name: 'root', _type: 'folder' };
   for (const [key, v] of Object.entries(registry)) {
     if (v._type === 'folder') {
-      // Use registry key as the canonical folderId for path reconstruction
       const fp = folderFullPath(key, registry);
       if (fp === path) return { ...v, _regKey: key };
     }
@@ -95,7 +108,6 @@ function filesInFolder(folderId: string | null, registry: Record<string, any>) {
   return Object.values(registry).filter((v: any) => {
     if (v._type) return false;
     if (folderId === null) return !v.folderId;
-    // Match against both v.folderId property and potential registry key
     return v.folderId === folderId;
   });
 }
@@ -137,9 +149,7 @@ function bytesToBigInt(value: unknown): bigint {
       const n = BigInt(value.trim());
       return n < 0n ? 0n : n;
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
   return 0n;
 }
 
@@ -171,14 +181,11 @@ function davDate(iso: string) {
 }
 
 function encodeDavPathSegments(path: string) {
-  // WebDAV <D:href> should be an absolute path with URL-escaped segments.
-  // Keep "/" separators but escape each segment (spaces, unicode, etc).
   const segs = path.split('/').filter((s) => s.length > 0);
   return (
     '/' +
     segs
       .map((s) => {
-        // If `path` already contains escapes (e.g. from url.pathname), normalize instead of double-encoding.
         const decoded = decodeURIComponent(s);
         return encodeURIComponent(decoded);
       })
@@ -272,15 +279,9 @@ async function pumpToWriter(
   }
 }
 
-/* ----------------------------- Replaced network helpers ------------------------------
-   The original hooks used `fetch` to call Telegram getFile and CDN. That path was the
-   reason WebDAV hit "Bad Request: file is too big". Here we reuse the library helper
-   `downloadFileFromTelegram(fileId)` (which uses axios and your project's robust logic)
-   to fetch meta and chunk data reliably.
-*/
+/* ----------------------------- Replaced network helpers ------------------------------ */
 
 async function fetchMeta(metaFileId: string): Promise<any> {
-  // downloadFileFromTelegram returns { data: Buffer, filename, mimeType }
   const bufRes = await downloadFileFromTelegram(metaFileId);
   const buf = bufRes.data;
   try {
@@ -296,8 +297,6 @@ async function downloadChunk(fileId: string): Promise<Buffer> {
   return res.data;
 }
 
-/* ------------------------------------------------------------------------------- */
-
 async function downloadFileRange(file: any, start: number, end: number): Promise<Buffer> {
   const meta = await fetchMeta(file.metaFileId);
   if (meta.chunked && Array.isArray(meta.chunks)) {
@@ -312,7 +311,7 @@ async function downloadFileRange(file: any, start: number, end: number): Promise
       if (!(end < chunkStart || start > chunkEnd)) {
         const buf = await downloadChunk(chunk.file_id);
         const from = Math.max(0, start - chunkStart);
-        const to = Math.min(buf.length, end - chunkStart + 1); // exclusive slice end
+        const to = Math.min(buf.length, end - chunkStart + 1);
         parts.push(buf.slice(from, to));
       }
       offset += chunkSize;
@@ -323,7 +322,6 @@ async function downloadFileRange(file: any, start: number, end: number): Promise
   return metaBuf.slice(start, end + 1);
 }
 
-// ── Telegram download (merging if chunked) ─────────────────────────────────────────
 async function downloadFile(file: any): Promise<Buffer> {
   const meta = await fetchMeta(file.metaFileId);
   if (meta.chunked && Array.isArray(meta.chunks)) {
@@ -341,7 +339,6 @@ async function downloadFile(file: any): Promise<Buffer> {
 async function streamFileRange(file: any, start: number, end: number): Promise<ReadableStream<Uint8Array>> {
   const meta = await fetchMeta(file.metaFileId);
 
-  // Non-chunked: proxy telegram stream with range
   if (!meta.chunked || !Array.isArray(meta.chunks)) {
     const tgUrl = await getTgUrl(meta.telegramFileId);
     if (!tgUrl) throw new Error('Could not get Telegram URL');
@@ -351,7 +348,6 @@ async function streamFileRange(file: any, start: number, end: number): Promise<R
     return tgRes.body;
   }
 
-  // Chunked: stream only overlapping pieces across chunks
   const sorted = [...meta.chunks].sort((a: any, b: any) => a.index - b.index);
   let pos = 0;
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -378,7 +374,7 @@ async function streamFileRange(file: any, start: number, end: number): Promise<R
         await pumpToWriter(tgRes.body, writer);
       }
     } catch {
-      // If upstream fails mid-stream, close; client will see truncated transfer.
+      // If upstream fails mid-stream, client may see a truncated transfer.
     } finally {
       await writer.close().catch(() => {});
     }
@@ -390,7 +386,6 @@ async function streamFileRange(file: any, start: number, end: number): Promise<R
 async function streamFileAll(file: any): Promise<ReadableStream<Uint8Array>> {
   const meta = await fetchMeta(file.metaFileId);
 
-  // Non-chunked: proxy telegram stream directly
   if (!meta.chunked || !Array.isArray(meta.chunks)) {
     const tgUrl = await getTgUrl(meta.telegramFileId);
     if (!tgUrl) throw new Error('Could not get Telegram URL');
@@ -400,7 +395,6 @@ async function streamFileAll(file: any): Promise<ReadableStream<Uint8Array>> {
     return tgRes.body;
   }
 
-  // Chunked: stream chunks sequentially
   const sorted = [...meta.chunks].sort((a: any, b: any) => a.index - b.index);
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
@@ -415,7 +409,7 @@ async function streamFileAll(file: any): Promise<ReadableStream<Uint8Array>> {
         await pumpToWriter(tgRes.body, writer);
       }
     } catch {
-      // same rationale as above
+      // best effort
     } finally {
       await writer.close().catch(() => {});
     }
@@ -428,17 +422,14 @@ async function streamFileAll(file: any): Promise<ReadableStream<Uint8Array>> {
 async function handleOptions() {
   return new Response(null, {
     status: 200,
-    headers: {
-      'DAV': '1, 2',
-      'Allow': 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, MKCOL, MOVE, COPY',
-      'MS-Author-Via': 'DAV',
-    },
+    headers: davHeaders({
+      Allow: 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, MKCOL, MOVE, COPY',
+    }),
   });
 }
 
 async function handlePropfind(request: Request, url: URL, registry: Record<string, any>) {
   const depth = request.headers.get('Depth') ?? '1';
-  // IMPORTANT: use encoded path for strict clients (CrossFTP, etc.)
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const { folderPath, fileName } = parsePath(url);
   const isRoot = !folderPath && !fileName;
@@ -446,13 +437,10 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
 
   const responses: string[] = [];
 
-  // Root or folder listing
   if (!fileName) {
     const folder = findFolder(folderPath, registry);
-    // Use the registry key as folderId for child lookups
     const folderId = folder?._regKey ?? folder?.folderId ?? null;
 
-    // Self entry
     responses.push(propResponse(
       ensureTrailingSlash(encodeDavPathSegments(pathname)),
       true,
@@ -463,7 +451,6 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
     ));
 
     if (depth !== '0') {
-      // Subfolders
       for (const sf of subfoldersOf(folderId, registry)) {
         const sfPath = ensureTrailingSlash(`${pathname}/${sf.name}`.replace(/\/+/g, '/'));
         responses.push(
@@ -476,7 +463,7 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
           )
         );
       }
-      // Files
+
       for (const f of filesInFolder(folderId, registry)) {
         const fPath = `${pathname}/${(f as any).fileName}`.replace(/\/+/g, '/');
         responses.push(
@@ -491,11 +478,15 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
       }
     }
   } else {
-    // Single file
     const folder = findFolder(folderPath, registry);
     const folderId = folder?._regKey ?? null;
     const file = filesInFolder(folderId, registry).find((f: any) => f.fileName === fileName);
-    if (!file) return new Response('Not Found', { status: 404 });
+    if (!file) {
+      return new Response('Not Found', {
+        status: 404,
+        headers: davHeaders(),
+      });
+    }
     responses.push(
       propResponse(
         encodeDavPathSegments(pathname),
@@ -509,42 +500,48 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
 
   return new Response(multistatus(responses), {
     status: 207,
-    headers: {
+    headers: davHeaders({
       'Content-Type': 'application/xml; charset=utf-8',
-      'DAV': '1, 2',
-      'MS-Author-Via': 'DAV',
-      ...(quota
-        ? {
-            'X-Quota-Available-Bytes': quota.available,
-            'X-Quota-Used-Bytes': quota.used,
-          }
-        : {}),
-    },
+      ...(quota ? {
+        'X-Quota-Available-Bytes': quota.available,
+        'X-Quota-Used-Bytes': quota.used,
+      } : {}),
+    }),
   });
 }
 
 async function handleGet(request: Request, url: URL, registry: Record<string, any>) {
   const { folderPath, fileName } = parsePath(url);
-  if (!fileName) return new Response('Is a directory', { status: 400 });
+  if (!fileName) {
+    return new Response('Is a directory', {
+      status: 400,
+      headers: davHeaders(),
+    });
+  }
 
   const folder = findFolder(folderPath, registry);
   const folderId = folder?._regKey ?? null;
   const file = filesInFolder(folderId, registry).find((f: any) => f.fileName === fileName) as any;
-  if (!file) return new Response('Not Found', { status: 404 });
+  if (!file) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: davHeaders(),
+    });
+  }
 
-  // Some older entries may not have totalBytes/type in the registry; derive from meta so
-  // strict media clients can seek (needs Content-Length + Range).
   let totalBytes = Number(file.totalBytes ?? 0);
   let contentType = file.type ?? 'application/octet-stream';
+
   if ((!totalBytes || totalBytes <= 0) && file.metaFileId) {
     try {
       const meta = await fetchMeta(file.metaFileId);
       if (meta && typeof meta.totalBytes === 'number') totalBytes = meta.totalBytes;
       if (meta && typeof meta.type === 'string') contentType = meta.type;
     } catch {
-      // Best-effort; continue without length if meta can't be fetched.
+      // best effort
     }
   }
+
   const rangeHeader = request.headers.get('Range');
 
   if (rangeHeader && totalBytes > 0) {
@@ -552,7 +549,9 @@ async function handleGet(request: Request, url: URL, registry: Record<string, an
     if (!range) {
       return new Response('Requested Range Not Satisfiable', {
         status: 416,
-        headers: { 'Content-Range': `bytes */${totalBytes}` }
+        headers: davHeaders({
+          'Content-Range': `bytes */${totalBytes}`,
+        }),
       });
     }
 
@@ -560,69 +559,90 @@ async function handleGet(request: Request, url: URL, registry: Record<string, an
     const body = await streamFileRange(file, start, end);
     return new Response(body, {
       status: 206,
-      headers: {
+      headers: davHeaders({
         'Content-Type': contentType,
         'Content-Length': String(end - start + 1),
         'Content-Range': `bytes ${start}-${end}/${totalBytes}`,
         'Accept-Ranges': 'bytes',
         'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-      },
+      }),
     });
   }
 
   const body = await streamFileAll(file);
   return new Response(body, {
     status: 200,
-    headers: {
+    headers: davHeaders({
       'Content-Type': contentType,
       ...(totalBytes > 0 ? { 'Content-Length': String(totalBytes) } : {}),
       'Accept-Ranges': 'bytes',
       'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-    },
+    }),
   });
 }
 
 async function handleHead(url: URL, registry: Record<string, any>) {
   const { folderPath, fileName } = parsePath(url);
-  if (!fileName) return new Response('Is a directory', { status: 400 });
+  if (!fileName) {
+    return new Response('Is a directory', {
+      status: 400,
+      headers: davHeaders(),
+    });
+  }
 
   const folder = findFolder(folderPath, registry);
   const folderId = folder?._regKey ?? null;
   const file = filesInFolder(folderId, registry).find((f: any) => f.fileName === fileName) as any;
-  if (!file) return new Response('Not Found', { status: 404 });
+  if (!file) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: davHeaders(),
+    });
+  }
 
   let totalBytes = Number(file.totalBytes ?? 0);
   let contentType = file.type ?? 'application/octet-stream';
+
   if ((!totalBytes || totalBytes <= 0) && file.metaFileId) {
     try {
       const meta = await fetchMeta(file.metaFileId);
       if (meta && typeof meta.totalBytes === 'number') totalBytes = meta.totalBytes;
       if (meta && typeof meta.type === 'string') contentType = meta.type;
     } catch {
-      // Best-effort
+      // best effort
     }
   }
+
   return new Response(null, {
     status: 200,
-    headers: {
+    headers: davHeaders({
       'Content-Type': contentType,
       'Content-Length': String(totalBytes),
       'Accept-Ranges': 'bytes',
       'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-    },
+    }),
   });
 }
 
 async function handlePut(request: Request, url: URL, registry: Record<string, any>, apiKey: string) {
   const { folderPath, fileName: originalFileName } = parsePath(url);
-  if (!originalFileName) return new Response('Cannot PUT a directory', { status: 405 });
+  if (!originalFileName) {
+    return new Response('Cannot PUT a directory', {
+      status: 405,
+      headers: davHeaders(),
+    });
+  }
 
   const folder = findFolder(folderPath, registry);
-  if (!folder && folderPath) return new Response('Parent folder not found', { status: 409 });
+  if (!folder && folderPath) {
+    return new Response('Parent folder not found', {
+      status: 409,
+      headers: davHeaders(),
+    });
+  }
 
   const folderId = folder?._regKey ?? null;
 
-  // Keep checking until we find an unused name (handles rapid parallel uploads)
   let finalName = originalFileName;
   let counter = 1;
   while (true) {
@@ -637,7 +657,6 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
     }
     if (!exists) break;
 
-    // Extract extension for proper renaming
     const dotIdx = originalFileName.lastIndexOf('.');
     const ext = dotIdx > 0 ? originalFileName.slice(dotIdx) : '';
     const nameWithoutExt = dotIdx > 0 ? originalFileName.slice(0, dotIdx) : originalFileName;
@@ -651,8 +670,13 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   let total = 0;
   let i = 0;
 
-  // Stream upload: do not buffer the entire file in memory.
-  if (!request.body) return new Response('Missing request body', { status: 400 });
+  if (!request.body) {
+    return new Response('Missing request body', {
+      status: 400,
+      headers: davHeaders(),
+    });
+  }
+
   const reader = request.body.getReader();
   let pending = new Uint8Array(0);
 
@@ -661,13 +685,11 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
     if (done) break;
     if (!value || value.length === 0) continue;
 
-    // Append to pending buffer
     const merged = new Uint8Array(pending.length + value.length);
     merged.set(pending, 0);
     merged.set(value, pending.length);
     pending = merged;
 
-    // Flush full chunks
     while (pending.length >= CHUNK) {
       const slice = pending.slice(0, CHUNK);
       pending = pending.slice(CHUNK);
@@ -678,7 +700,6 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
     }
   }
 
-  // Flush final partial chunk (including empty file => upload 0 bytes)
   if (pending.length > 0 || chunks.length === 0) {
     const slice = pending;
     const { file_id, message_id } = await uploadBytesToTelegram(slice, `${finalName}.chunk${i}`);
@@ -687,30 +708,39 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   }
 
   const meta = {
-    fileName: finalName, type: ct, totalBytes: total,
+    fileName: finalName,
+    type: ct,
+    totalBytes: total,
     time: new Date().toISOString(),
     chunked: chunks.length > 1,
     ...(chunks.length > 1 ? { chunks } : { telegramFileId: chunks[0].file_id }),
   };
+
   const metaBuf = Buffer.from(JSON.stringify(meta));
   const { file_id: metaFileId } = await uploadBytesToTelegram(metaBuf, `${finalName}.meta.json`);
 
   const rec: any = {
-    metaFileId, fileName: finalName, type: ct,
-    totalBytes: total, time: meta.time,
+    metaFileId,
+    fileName: finalName,
+    type: ct,
+    totalBytes: total,
+    time: meta.time,
     ...(folderId ? { folderId } : {}),
   };
+
   registry[metaFileId] = rec;
   await writeRegistry(registry);
 
-  return new Response(null, { status: 201 });
+  return new Response(null, {
+    status: 201,
+    headers: davHeaders(),
+  });
 }
 
 async function handleDelete(url: URL, registry: Record<string, any>) {
   const { folderPath, fileName } = parsePath(url);
 
   if (fileName) {
-    // Delete file
     const folder = findFolder(folderPath, registry);
     const folderId = folder?._regKey ?? null;
     let deleted = false;
@@ -722,54 +752,79 @@ async function handleDelete(url: URL, registry: Record<string, any>) {
         break;
       }
     }
-    if (!deleted) return new Response('Not Found', { status: 404 });
+    if (!deleted) {
+      return new Response('Not Found', {
+        status: 404,
+        headers: davHeaders(),
+      });
+    }
   } else if (folderPath) {
-    // Delete folder recursively
     const folder = findFolder(folderPath, registry);
-    if (!folder) return new Response('Not Found', { status: 404 });
+    if (!folder) {
+      return new Response('Not Found', {
+        status: 404,
+        headers: davHeaders(),
+      });
+    }
     const targetId = folder._regKey ?? folder.folderId;
 
-    // Gather all descendant folder IDs
     const folderIds = new Set<string | null>([targetId]);
     let changed = true;
     while (changed) {
       changed = false;
       for (const v of Object.values(registry) as any[]) {
         if (v._type === 'folder' && folderIds.has(v.parentId) && !folderIds.has(v.folderId)) {
-          folderIds.add(v.folderId); changed = true;
+          folderIds.add(v.folderId);
+          changed = true;
         }
       }
     }
-    // Delete all files in those folders
+
     for (const [k, v] of Object.entries(registry) as any[]) {
       if (!v._type && folderIds.has(v.folderId ?? null)) {
         await deleteFile(k).catch(() => { delete registry[k]; });
       }
     }
-    // Delete folder records
+
     for (const [k, v] of Object.entries(registry) as any[]) {
       if (v._type === 'folder' && folderIds.has(v.folderId)) delete registry[k];
     }
   } else {
-    return new Response('Cannot delete root', { status: 405 });
+    return new Response('Cannot delete root', {
+      status: 405,
+      headers: davHeaders(),
+    });
   }
 
   await writeRegistry(registry);
-  return new Response(null, { status: 204 });
+  return new Response(null, {
+    status: 204,
+    headers: davHeaders(),
+  });
 }
 
 async function handleMkcol(url: URL, registry: Record<string, any>) {
   const { folderPath } = parsePath(url);
-  if (!folderPath) return new Response('Cannot create root', { status: 405 });
+  if (!folderPath) {
+    return new Response('Cannot create root', {
+      status: 405,
+      headers: davHeaders(),
+    });
+  }
+
   const parts = folderPath.split('/');
   const name = parts.pop()!;
   const parentPath = parts.join('/');
   const parent = findFolder(parentPath, registry);
-  if (!parent && parentPath) return new Response('Parent not found', { status: 409 });
+  if (!parent && parentPath) {
+    return new Response('Parent not found', {
+      status: 409,
+      headers: davHeaders(),
+    });
+  }
 
   const parentId = parent?._regKey ?? null;
 
-  // Keep checking until we find an unused name (handles rapid parallel requests)
   let finalName = name;
   let counter = 1;
   while (true) {
@@ -789,12 +844,18 @@ async function handleMkcol(url: URL, registry: Record<string, any>) {
 
   const folderId = 'folder:' + crypto.randomUUID();
   registry[folderId] = {
-    _type: 'folder', folderId, name: finalName,
+    _type: 'folder',
+    folderId,
+    name: finalName,
     createdAt: new Date().toISOString(),
     ...(parent?._regKey ? { parentId: parent._regKey } : {}),
   };
+
   await writeRegistry(registry);
-  return new Response(null, { status: 201 });
+  return new Response(null, {
+    status: 201,
+    headers: davHeaders(),
+  });
 }
 
 function destFromHeader(request: Request): { folderPath: string; fileName: string | null } {
@@ -812,22 +873,37 @@ async function handleMove(request: Request, url: URL, registry: Record<string, a
   if (src.fileName) {
     const srcFolder = findFolder(src.folderPath, registry);
     const srcFolderId = srcFolder?._regKey ?? null;
-    // Find registry key of file directly — don't use object reference
     const fileKey = Object.keys(registry).find(k => {
       const v = registry[k];
       return !v._type && v.fileName === src.fileName && (v.folderId ?? null) === srcFolderId;
     });
-    if (!fileKey) return new Response('Not Found', { status: 404 });
+
+    if (!fileKey) {
+      return new Response('Not Found', {
+        status: 404,
+        headers: davHeaders(),
+      });
+    }
 
     const destFolder = findFolder(dest.folderPath, registry);
-    if (dest.folderPath && !destFolder) return new Response('Destination folder not found', { status: 409 });
+    if (dest.folderPath && !destFolder) {
+      return new Response('Destination folder not found', {
+        status: 409,
+        headers: davHeaders(),
+      });
+    }
 
     registry[fileKey].fileName = dest.fileName ?? src.fileName;
     if (destFolder?._regKey) registry[fileKey].folderId = destFolder._regKey;
     else delete registry[fileKey].folderId;
   } else if (src.folderPath) {
     const folder = findFolder(src.folderPath, registry);
-    if (!folder?._regKey) return new Response('Not Found', { status: 404 });
+    if (!folder?._regKey) {
+      return new Response('Not Found', {
+        status: 404,
+        headers: davHeaders(),
+      });
+    }
 
     const newName = dest.fileName ?? dest.folderPath.split('/').pop() ?? folder.name;
     const destParentPath = dest.folderPath || '';
@@ -837,28 +913,48 @@ async function handleMove(request: Request, url: URL, registry: Record<string, a
     if (destParent?._regKey) registry[folder._regKey].parentId = destParent._regKey;
     else if (!destParentPath) delete registry[folder._regKey].parentId;
   } else {
-    return new Response('Cannot move root', { status: 405 });
+    return new Response('Cannot move root', {
+      status: 405,
+      headers: davHeaders(),
+    });
   }
 
   await writeRegistry(registry);
-  return new Response(null, { status: 201 });
+  return new Response(null, {
+    status: 201,
+    headers: davHeaders(),
+  });
 }
 
 async function handleCopy(request: Request, url: URL, registry: Record<string, any>) {
   const src = parsePath(url);
   const dest = destFromHeader(request);
 
-  if (!src.fileName) return new Response('Folder copy not supported', { status: 405 });
+  if (!src.fileName) {
+    return new Response('Folder copy not supported', {
+      status: 405,
+      headers: davHeaders(),
+    });
+  }
 
   const srcFolder = findFolder(src.folderPath, registry);
   const file = filesInFolder(srcFolder?._regKey ?? null, registry)
     .find((f: any) => f.fileName === src.fileName) as any;
-  if (!file) return new Response('Not Found', { status: 404 });
+  if (!file) {
+    return new Response('Not Found', {
+      status: 404,
+      headers: davHeaders(),
+    });
+  }
 
   const destFolder = findFolder(dest.folderPath, registry);
-  if (dest.folderPath && !destFolder) return new Response('Destination not found', { status: 409 });
+  if (dest.folderPath && !destFolder) {
+    return new Response('Destination not found', {
+      status: 409,
+      headers: davHeaders(),
+    });
+  }
 
-  // Copy = new registry entry pointing to same metaFileId (same Telegram files)
   const newKey: string = 'copy:' + crypto.randomUUID();
   registry[newKey] = {
     ...file,
@@ -866,10 +962,14 @@ async function handleCopy(request: Request, url: URL, registry: Record<string, a
     time: new Date().toISOString(),
     ...(destFolder?._regKey ? { folderId: destFolder._regKey } : {}),
   };
-  if (!destFolder?.folderId) delete registry[newKey].folderId;
+
+  if (!destFolder?._regKey) delete registry[newKey].folderId;
 
   await writeRegistry(registry);
-  return new Response(null, { status: 201 });
+  return new Response(null, {
+    status: 201,
+    headers: davHeaders(),
+  });
 }
 
 async function handleLock(url: URL) {
@@ -890,10 +990,10 @@ async function handleLock(url: URL) {
 </D:prop>`;
   return new Response(xml, {
     status: 200,
-    headers: {
+    headers: davHeaders({
       'Content-Type': 'application/xml; charset=utf-8',
       'Lock-Token': `<${lockToken}>`,
-    },
+    }),
   });
 }
 
@@ -903,15 +1003,12 @@ export const handle: Handle = async ({ event, resolve }) => {
   const method = request.method.toUpperCase();
   const url = new URL(request.url);
 
-  // Skip WebDAV handling for API routes and assets
   const path = url.pathname;
   if (path.startsWith('/api/') || path.startsWith('/_app/') || path.startsWith('/favicon')) {
     return resolve(event);
   }
 
-  // Handle WebDAV methods
   const isWebDAV = DAV_METHODS.has(method) || method === 'PUT' || method === 'DELETE';
-  // Intercept GET/HEAD only if it looks like a WebDAV file request (has auth header)
   const isWebDAVGet = (method === 'GET' || method === 'HEAD') &&
     request.headers.has('Authorization') &&
     request.headers.get('Authorization')!.startsWith('Basic ');
@@ -920,7 +1017,6 @@ export const handle: Handle = async ({ event, resolve }) => {
     return resolve(event);
   }
 
-  // Auth
   const auth = await davAuth(request);
   if (!auth) return unauth();
 
@@ -936,8 +1032,16 @@ export const handle: Handle = async ({ event, resolve }) => {
   if (method === 'MOVE') return handleMove(request, url, registry);
   if (method === 'COPY') return handleCopy(request, url, registry);
   if (method === 'LOCK') return handleLock(url);
-  if (method === 'UNLOCK') return new Response(null, { status: 204 });
-  if (method === 'PROPPATCH') return new Response(multistatus([]), { status: 207, headers: { 'Content-Type': 'application/xml' } });
+  if (method === 'UNLOCK') return new Response(null, { status: 204, headers: davHeaders() });
+  if (method === 'PROPPATCH') {
+    return new Response(multistatus([]), {
+      status: 207,
+      headers: davHeaders({ 'Content-Type': 'application/xml; charset=utf-8' }),
+    });
+  }
 
-  return new Response('Not Implemented', { status: 501 });
+  return new Response('Not Implemented', {
+    status: 501,
+    headers: davHeaders(),
+  });
 };
