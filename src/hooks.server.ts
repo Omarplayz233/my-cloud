@@ -20,6 +20,10 @@ import { TG_SAFE_CHUNK_BYTES } from '$lib/telegramLimits';
 const BOT_TOKEN = () => env.TELEGRAM_BOT_TOKEN!;
 const TELE_API = () => `https://api.telegram.org/bot${BOT_TOKEN()}`;
 
+// Keep this realistic for WebDAV clients, but still absurdly huge.
+// rclone can also be told the total size with --vfs-disk-space-total-size 1Y.
+const FAKE_TOTAL_BYTES = 9223372036854775807n; // max signed int64 for compatibility
+
 const DAV_METHODS = new Set(['PROPFIND', 'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK', 'OPTIONS']);
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -125,6 +129,38 @@ function uniqueFileName(baseName: string, existingNames: Set<string>): string {
   return candidate;
 }
 
+function bytesToBigInt(value: unknown): bigint {
+  try {
+    if (typeof value === 'bigint') return value < 0n ? 0n : value;
+    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.max(0, Math.floor(value)));
+    if (typeof value === 'string' && value.trim()) {
+      const n = BigInt(value.trim());
+      return n < 0n ? 0n : n;
+    }
+  } catch {
+    // ignore
+  }
+  return 0n;
+}
+
+function registryUsedBytes(registry: Record<string, any>): bigint {
+  let total = 0n;
+  for (const v of Object.values(registry) as any[]) {
+    if (v?._type) continue;
+    total += bytesToBigInt(v?.totalBytes ?? 0);
+  }
+  return total;
+}
+
+function davQuota(registry: Record<string, any>) {
+  const used = registryUsedBytes(registry);
+  const available = FAKE_TOTAL_BYTES > used ? FAKE_TOTAL_BYTES - used : 0n;
+  return {
+    available: available.toString(),
+    used: used.toString(),
+  };
+}
+
 // ── XML helpers ───────────────────────────────────────────────────────────────
 function xmlEscape(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -154,17 +190,28 @@ function ensureTrailingSlash(p: string) {
   return p.endsWith('/') ? p : p + '/';
 }
 
-function propResponse(href: string, isDir: boolean, name: string, size: number, modified: string) {
+function propResponse(
+  href: string,
+  isDir: boolean,
+  name: string,
+  size: number,
+  modified: string,
+  quota?: { available: string; used: string }
+) {
   return `<D:response>
   <D:href>${xmlEscape(href)}</D:href>
   <D:propstat>
     <D:prop>
       <D:displayname>${xmlEscape(name)}</D:displayname>
       <D:getlastmodified>${davDate(modified)}</D:getlastmodified>
-      ${isDir
-      ? `<D:resourcetype><D:collection/></D:resourcetype>`
-      : `<D:resourcetype/><D:getcontentlength>${size}</D:getcontentlength><D:getcontenttype>application/octet-stream</D:getcontenttype>`
-    }
+      ${quota ? `<D:quota-available-bytes>${quota.available}</D:quota-available-bytes>
+      <D:quota-used-bytes>${quota.used}</D:quota-used-bytes>
+      <D:quota-root><D:href>/</D:href></D:quota-root>` : ''}
+      ${
+        isDir
+          ? `<D:resourcetype><D:collection/></D:resourcetype>`
+          : `<D:resourcetype/><D:getcontentlength>${size}</D:getcontentlength><D:getcontenttype>application/octet-stream</D:getcontenttype>`
+      }
     </D:prop>
     <D:status>HTTP/1.1 200 OK</D:status>
   </D:propstat>
@@ -394,6 +441,8 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
   // IMPORTANT: use encoded path for strict clients (CrossFTP, etc.)
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const { folderPath, fileName } = parsePath(url);
+  const isRoot = !folderPath && !fileName;
+  const quota = isRoot ? davQuota(registry) : undefined;
 
   const responses: string[] = [];
 
@@ -407,9 +456,10 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
     responses.push(propResponse(
       ensureTrailingSlash(encodeDavPathSegments(pathname)),
       true,
-      folderPath ? folderPath.split('/').pop()! : 'Cloud',
+      isRoot ? "Omar's Cloud" : (folderPath ? folderPath.split('/').pop()! : 'Cloud'),
       0,
       folder?.createdAt ?? new Date().toISOString(),
+      quota
     ));
 
     if (depth !== '0') {
@@ -459,7 +509,17 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
 
   return new Response(multistatus(responses), {
     status: 207,
-    headers: { 'Content-Type': 'application/xml; charset=utf-8', 'DAV': '1, 2' },
+    headers: {
+      'Content-Type': 'application/xml; charset=utf-8',
+      'DAV': '1, 2',
+      'MS-Author-Via': 'DAV',
+      ...(quota
+        ? {
+            'X-Quota-Available-Bytes': quota.available,
+            'X-Quota-Used-Bytes': quota.used,
+          }
+        : {}),
+    },
   });
 }
 
@@ -568,7 +628,7 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
   while (true) {
     let exists = false;
     for (const [k, v] of Object.entries(registry)) {
-      if (!(v as any)._type && 
+      if (!(v as any)._type &&
           ((v as any).fileName ?? '').toLowerCase() === finalName.toLowerCase() &&
           ((v as any).folderId ?? null) === folderId) {
         exists = true;
@@ -576,7 +636,7 @@ async function handlePut(request: Request, url: URL, registry: Record<string, an
       }
     }
     if (!exists) break;
-    
+
     // Extract extension for proper renaming
     const dotIdx = originalFileName.lastIndexOf('.');
     const ext = dotIdx > 0 ? originalFileName.slice(dotIdx) : '';
@@ -715,7 +775,7 @@ async function handleMkcol(url: URL, registry: Record<string, any>) {
   while (true) {
     let exists = false;
     for (const [key, item] of Object.entries(registry)) {
-      if ((item as any)._type === 'folder' && 
+      if ((item as any)._type === 'folder' &&
           ((item as any).name ?? '').toLowerCase() === finalName.toLowerCase() &&
           ((item as any).parentId ?? null) === parentId) {
         exists = true;
