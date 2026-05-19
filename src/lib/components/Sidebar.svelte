@@ -7,7 +7,6 @@
     IconFolder, IconFile, IconCloud, IconChevronUp, IconChevronDown,
     IconPencil,
     IconChartBar,
-    IconLock,
   } from '@tabler/icons-svelte';
 
   type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault';
