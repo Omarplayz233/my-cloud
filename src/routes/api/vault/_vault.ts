@@ -91,7 +91,7 @@ export async function deriveVaultKey(password: string, salt: Uint8Array, extract
     {
       name: 'PBKDF2',
       salt,
-      iterations: 600000,
+      iterations: 100000,
       hash: 'SHA-256'
     },
     baseKey,
