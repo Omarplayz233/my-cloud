@@ -78,7 +78,7 @@ export async function sha256(data: ArrayBuffer | Uint8Array | string) {
     .join('');
 }
 
-export async function deriveVaultKey(password: string, salt: Uint8Array, extractable = false) {
+export async function deriveVaultKey(password: string, salt: Uint8Array, extractable = true) {
   const baseKey = await subtle.importKey(
     'raw',
     new TextEncoder().encode(password),
