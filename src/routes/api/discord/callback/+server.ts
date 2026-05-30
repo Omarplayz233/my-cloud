@@ -3,13 +3,13 @@ import type { RequestHandler } from './$types';
 import axios from 'axios';
 import { generateApiKeyForDiscordId } from '$lib/telegramStorage';
 
-const ALLOWED_IDS = new Set([import.meta.env.OWNER_ID!]);
+const ALLOWED_IDS = new Set([process.env.OWNER_ID!]);
 
 const BASE_URL =
-  import.meta.env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
+  process.env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
 
-const CLIENT_ID = import.meta.env.DISCORD_CLIENT_ID ?? '';
-const CLIENT_SECRET = import.meta.env.DISCORD_CLIENT_SECRET ?? '';
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID ?? '';
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET ?? '';
 
 export const GET: RequestHandler = async ({ url }) => {
   try {
