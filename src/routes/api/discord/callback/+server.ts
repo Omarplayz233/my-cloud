@@ -2,15 +2,14 @@
 import type { RequestHandler } from './$types';
 import axios from 'axios';
 import { generateApiKeyForDiscordId } from '$lib/telegramStorage';
+import { env } from '$env/dynamic/private';
 
-export const GET: RequestHandler = async ({ url, platform }) => {
+export const GET: RequestHandler = async ({ url }) => {
   try {
-    const env = platform?.env;
-
-    const OWNER_ID = env?.OWNER_ID ?? '';
-    const BASE_URL = env?.PUBLIC_BASE_URL ?? 'http://localhost:5173';
-    const CLIENT_ID = env?.DISCORD_CLIENT_ID ?? '';
-    const CLIENT_SECRET = env?.DISCORD_CLIENT_SECRET ?? '';
+    const OWNER_ID = env.OWNER_ID ?? '';
+    const BASE_URL = env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
+    const CLIENT_ID = env.DISCORD_CLIENT_ID ?? '';
+    const CLIENT_SECRET = env.DISCORD_CLIENT_SECRET ?? '';
 
     if (!CLIENT_ID || !CLIENT_SECRET) {
       return new Response(JSON.stringify({ error: 'Missing Discord env vars' }), { status: 500 });
