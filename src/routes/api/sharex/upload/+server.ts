@@ -3,7 +3,6 @@ import type { RequestHandler } from './$types';
 import { decrypt } from '$lib/crypto';
 import {
   getRecordByApiKey,
-  registerFile,
   readRegistry,
   writeRegistry,
   uploadBytesToTelegram,
@@ -35,7 +34,6 @@ function extractFile(body: Buffer, ct: string | null) {
   const boundary = parseBoundary(ct);
   if (!boundary) return null;
 
-  const delim = Buffer.from(`\r\n--${boundary}`);
   const first = Buffer.from(`--${boundary}`);
 
   const pos = body.indexOf(first);
@@ -144,74 +142,3 @@ export const POST: RequestHandler = async ({ request }) => {
   }
 };
 
-  await writeRegistry(registry);
-  return folderId;
-}
-
-export const POST: RequestHandler = async ({ request }) => {
-  try {
-    const rawKey = (request.headers.get('x-api-key') ?? '').trim();
-    if (!rawKey) return jsonResp({ error: 'Missing API key' }, 403);
-
-    const apiKey = decrypt(rawKey) ?? rawKey;
-    const rec = await getRecordByApiKey(apiKey);
-    if (!rec) return jsonResp({ error: 'Forbidden' }, 403);
-
-    const body = Buffer.from(await request.arrayBuffer());
-    const ct = request.headers.get('content-type');
-
-    const file = extractFile(body, ct);
-    if (!file) return jsonResp({ error: 'No file' }, 400);
-
-    const fileName = file.filename.split('/').pop()!;
-    const folderId = await getOrCreateSharexFolder();
-    const time = new Date().toISOString();
-    const type = 'application/octet-stream';
-    const totalBytes = file.data.length;
-
-    const nChunks = Math.max(1, Math.ceil(totalBytes / CHUNK_SIZE));
-    const telegramChunks: { index: number; file_id: string; message_id: number; size: number }[] = [];
-
-    for (let i = 0; i < nChunks; i++) {
-      const slice = file.data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-      const { message_id, file_id } = await uploadBytesToTelegram(slice, `${fileName}.chunk${i}`);
-      telegramChunks.push({ index: i, file_id, message_id, size: slice.length });
-    }
-
-    const chunked = telegramChunks.length > 1;
-    const meta = {
-      fileName,
-      type,
-      time,
-      totalBytes,
-      chunked,
-      ...(chunked
-        ? { chunks: telegramChunks }
-        : { telegramFileId: telegramChunks[0].file_id, telegramMessageId: telegramChunks[0].message_id })
-    };
-
-    const { message_id: metaMessageId, file_id: metaFileId } = await uploadJsonToTelegram(meta, `${fileName}.json`);
-
-    await registerFile({
-      fileName,
-      type,
-      totalBytes,
-      time,
-      telegramFileId: chunked ? '' : telegramChunks[0].file_id,
-      telegramMessageId: telegramChunks[0].message_id,
-      metaFileId,
-      metaMessageId,
-      chunked: chunked || undefined,
-      chunkMessageIds: chunked ? telegramChunks.map(c => c.message_id) : undefined,
-      public: true,
-      folderId
-    });
-
-    return jsonResp({
-      url: `${BASE_URL}/sharex/public/${fileName}`
-    });
-  } catch (err: any) {
-    console.error('sharex upload error:', err?.message || err);
-    return jsonResp({ error: err?.message ?? 'Internal error' }, 500);
-  }
-};
