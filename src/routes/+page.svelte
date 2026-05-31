@@ -6,7 +6,7 @@
   import Files from '$lib/tabs/Files.svelte';
   import Generators from '$lib/tabs/Generators.svelte';
   import Downloader from '$lib/tabs/Downloader.svelte';
-  import Draw       from '$lib/tabs/Draw.svelte';
+  import Draw       from '$lib/draw/Draw.svelte';
   import Editor     from '$lib/tabs/Editor.svelte';
   import Stats      from '$lib/tabs/Stats.svelte';
   import Vault	    from '$lib/tabs/Vault.svelte';
