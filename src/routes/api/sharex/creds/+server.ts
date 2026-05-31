@@ -2,6 +2,7 @@
 import type { RequestHandler } from './$types';
 import { decrypt } from '$lib/crypto';
 import { getRecordByApiKey } from '$lib/telegramStorage';
+import { NAME } from '$lib/config';
 
 const BASE_URL =
   import.meta.env.PUBLIC_BASE_URL ?? 'http://localhost:5173';
@@ -25,7 +26,7 @@ export const GET: RequestHandler = async ({ url }) => {
 
   const sxcu = {
     Version: '17.0.0',
-    Name: "Omar's Cloud",
+    Name: `${NAME}'s Cloud`,
     DestinationType: 'ImageUploader, TextUploader, FileUploader',
     RequestMethod: 'POST',
     RequestURL: `${BASE_URL}/api/sharex/upload`,
@@ -41,7 +42,7 @@ export const GET: RequestHandler = async ({ url }) => {
   return new Response(JSON.stringify(sxcu, null, 2), {
     headers: {
       'Content-Type': 'application/octet-stream',
-      'Content-Disposition': 'attachment; filename="omars-cloud.sxcu"'
+      'Content-Disposition': `attachment; filename="${NAME}-cloud.sxcu"`
     }
   });
 };

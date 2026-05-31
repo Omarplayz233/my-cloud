@@ -47,6 +47,7 @@
     IconExternalLink,
     IconSearch,
     IconShare,
+    IconCloudDownload,
   } from "@tabler/icons-svelte";
 
   type FileRecord = {
@@ -1426,6 +1427,9 @@
                 >Documents</option
               ><option value="archive">Archives</option>
             </select>
+            <button class="tb-btn" onclick={copySharexCreds} title="Copy ShareX config URL">
+              <IconCloudDownload size={15} /> ShareX
+            </button>
             <span class="count"
               >{processedFiles.length} file{processedFiles.length !== 1
                 ? "s"

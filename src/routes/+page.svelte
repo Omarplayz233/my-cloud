@@ -10,6 +10,7 @@
   import Editor     from '$lib/tabs/Editor.svelte';
   import Stats      from '$lib/tabs/Stats.svelte';
   import Vault	    from '$lib/tabs/Vault.svelte';
+  import { NAME } from '$lib/config';
 
   let { data } = $props();
   let user = $derived(data.user);
@@ -105,7 +106,7 @@
 </script>
 
 <svelte:head>
-  <title>Omar's Cloud</title>
+  <title>{NAME}'s Cloud</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
 </svelte:head>

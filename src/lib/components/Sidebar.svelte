@@ -8,6 +8,7 @@
     IconPencil,
     IconChartBar,
   } from '@tabler/icons-svelte';
+  import { NAME } from '$lib/config';
 
   type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault';
 
@@ -91,7 +92,7 @@
   <div class="sb-top">
     <div class="sb-logo">
       <IconCloud size={18} stroke={1.5}/>
-      {#if isExpanded}<span class="sb-logo-text">Omar's Cloud</span>{/if}
+      {#if isExpanded}<span class="sb-logo-text">{NAME}'s Cloud</span>{/if}
     </div>
     {#if isExpanded}
       <button class="sb-lock" onclick={toggleLock} title={locked ? 'Unlock' : 'Lock open'}>

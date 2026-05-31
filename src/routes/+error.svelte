@@ -1,9 +1,10 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { NAME } from '$lib/config';
 </script>
 
 <svelte:head>
-  <title>{$page.status} — Omar's Cloud</title>
+  <title>{$page.status} — {NAME}'s Cloud</title>
 </svelte:head>
 
 <div class="root">

@@ -1,6 +1,7 @@
 <!-- src/lib/components/Login.svelte -->
 <script lang="ts">
   import { IconCloud } from '@tabler/icons-svelte';
+  import { NAME } from '$lib/config';
 
   let {
     onsuccess,
@@ -36,7 +37,7 @@
   <div class="login-card">
     <div class="logo">
       <IconCloud size={40} stroke={1.5} />
-      <h1>Omar's Cloud</h1>
+      <h1>{NAME}'s Cloud</h1>
       <p>Enter your API token to continue.</p>
     </div>
     <div class="token-form">

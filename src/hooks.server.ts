@@ -13,6 +13,7 @@ import {
   downloadFileFromTelegram
 } from '$lib/telegramStorage';
 import { decrypt } from '$lib/crypto';
+import { NAME } from '$lib/config';
 import type { Handle } from '@sveltejs/kit';
 import crypto from 'crypto';
 import { TG_SAFE_CHUNK_BYTES } from '$lib/telegramLimits';
@@ -41,7 +42,7 @@ function unauth() {
   return new Response('Unauthorized', {
     status: 401,
     headers: {
-      'WWW-Authenticate': 'Basic realm="omar\'s cloud :3"',
+      'WWW-Authenticate': `Basic realm="${NAME}'s cloud :3"`,
       'Cache-Control': 'no-store, max-age=0, must-revalidate',
       Pragma: 'no-cache',
       Expires: '0'
@@ -444,7 +445,7 @@ async function handlePropfind(request: Request, url: URL, registry: Record<strin
     responses.push(propResponse(
       ensureTrailingSlash(encodeDavPathSegments(pathname)),
       true,
-      isRoot ? "Omar's Cloud" : (folderPath ? folderPath.split('/').pop()! : 'Cloud'),
+      isRoot ? `${NAME}'s Cloud` : (folderPath ? folderPath.split('/').pop()! : 'Cloud'),
       0,
       folder?.createdAt ?? new Date().toISOString(),
       quota

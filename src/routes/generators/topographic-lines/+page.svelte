@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { IconArrowLeft, IconDownload, IconRefresh, IconInfoCircle } from '@tabler/icons-svelte';
   import SaveDialog from '$lib/components/SaveDialog.svelte';
+  import { NAME } from '$lib/config';
 
   let { data } = $props();
   let apiKey = $derived(data?.apiKey ?? "");
@@ -458,7 +459,7 @@
 </script>
 
 <svelte:head>
-  <title>Topographic Lines · Generators · Omar's Cloud</title>
+  <title>Topographic Lines · Generators · {NAME}'s Cloud</title>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 </svelte:head>
 

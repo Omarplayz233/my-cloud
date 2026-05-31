@@ -12,6 +12,7 @@
     IconChevronRight,
     IconCloud,
   } from "@tabler/icons-svelte";
+  import { NAME } from '$lib/config';
 
   let { data } = $props();
 
@@ -116,7 +117,7 @@
   <header>
     <div class="header-left">
       <IconCloud size={20} />
-      <span class="header-title">Omar's Cloud</span>
+      <span class="header-title">{NAME}'s Cloud</span>
     </div>
     <div class="header-right">
       <span class="header-badge">Public</span>

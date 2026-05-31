@@ -66,6 +66,25 @@ async function downloadFileId(fileId: string, responseType: 'text' | 'arraybuffe
   return responseType === 'arraybuffer' ? Buffer.from(r2.data) : r2.data;
 }
 
+/* -------------------- Mutex -------------------- */
+
+type MutexResolve = () => void;
+let _mutexQueue: MutexResolve[] = [];
+let _mutexLocked = false;
+
+export async function acquireMutex(): Promise<void> {
+  if (!_mutexLocked) { _mutexLocked = true; return; }
+  return new Promise<void>(resolve => { _mutexQueue.push(resolve); });
+}
+
+export function releaseMutex(): void {
+  if (_mutexQueue.length > 0) {
+    _mutexQueue.shift()!();
+  } else {
+    _mutexLocked = false;
+  }
+}
+
 /* -------------------- Deterministic Local Cache -------------------- */
 
 const CACHE_FILE = path.join(os.tmpdir(), '_telegram_robust_cache.json');
@@ -148,6 +167,10 @@ async function pinChatMessage(message_id: number): Promise<void> {
 /* -------------------- API key index (pinned, read-only after seeding) -------------------- */
 
 async function readIndexFile(): Promise<IndexFile> {
+  return readIndexFileInner(false);
+}
+
+async function readIndexFileInner(retry: boolean): Promise<IndexFile> {
   if (!TELE_API) throw new Error('Telegram not configured');
 
   const pinned = await getPinnedMessage();
@@ -168,8 +191,13 @@ async function readIndexFile(): Promise<IndexFile> {
     await updateLocalCache({ pinned_message_id: pinnedMsgId, indexFile: result });
     return result;
   } catch (err) {
-    console.warn('telegramStorage.readIndexFile: failed parse', (err as any).message || err);
-    return { keys: {} };
+    if (retry) {
+      console.warn('telegramStorage.readIndexFile: failed on retry', (err as any).message || err);
+      return { keys: {} };
+    }
+    console.warn('telegramStorage.readIndexFile: failed, retrying with cleared cache', (err as any).message || err);
+    await updateLocalCache({ pinned_message_id: undefined, indexFile: undefined });
+    return readIndexFileInner(true);
   }
 }
 
@@ -261,6 +289,10 @@ async function getRegistryPtr(): Promise<{ file_id: string; message_id: number }
 }
 
 export async function readRegistry(): Promise<Record<string, FileRecord>> {
+  return readRegistryInner(false);
+}
+
+async function readRegistryInner(retry: boolean): Promise<Record<string, FileRecord>> {
   const ptr = await getRegistryPtr();
   if (!ptr) return {};
 
@@ -277,12 +309,26 @@ export async function readRegistry(): Promise<Record<string, FileRecord>> {
     await updateLocalCache({ registryData: result, registryPtr: ptr });
     return result;
   } catch (err) {
-    console.warn('telegramStorage.readRegistry: failed parse', (err as any).message || err);
-    return {};
+    if (retry) {
+      console.warn('telegramStorage.readRegistry: failed on retry', (err as any).message || err);
+      return {};
+    }
+    console.warn('telegramStorage.readRegistry: failed, retrying with cleared cache', (err as any).message || err);
+    await updateLocalCache({ registryData: undefined, registryPtr: undefined });
+    return readRegistryInner(true);
   }
 }
 
 export async function writeRegistry(registry: Record<string, any>): Promise<void> {
+  await acquireMutex();
+  try {
+    await writeRegistryInternal(registry);
+  } finally {
+    releaseMutex();
+  }
+}
+
+async function writeRegistryInternal(registry: Record<string, any>): Promise<void> {
   const oldPtr = await getRegistryPtr();
 
   const tmp = `/tmp/_registry_${Date.now()}.json`;
@@ -307,9 +353,14 @@ export async function writeRegistry(registry: Record<string, any>): Promise<void
 }
 
 export async function registerFile(rec: FileRecord): Promise<void> {
-  const registry = await readRegistry() ?? {};
-  registry[rec.metaFileId] = rec;
-  await writeRegistry(registry);
+  await acquireMutex();
+  try {
+    const registry = await readRegistry() ?? {};
+    registry[rec.metaFileId] = rec;
+    await writeRegistryInternal(registry);
+  } finally {
+    releaseMutex();
+  }
 }
 
 export async function listFiles(query?: string): Promise<FileRecord[]> {
@@ -321,60 +372,85 @@ export async function listFiles(query?: string): Promise<FileRecord[]> {
 }
 
 export async function setFilePublicity(metaFileId: string, isPublic: boolean): Promise<boolean> {
-  const registry = await readRegistry() ?? {};
-  if (!registry[metaFileId]) return false;
-  registry[metaFileId].public = isPublic;
-  await writeRegistry(registry);
-  return true;
+  await acquireMutex();
+  try {
+    const registry = await readRegistry() ?? {};
+    if (!registry[metaFileId]) return false;
+    registry[metaFileId].public = isPublic;
+    await writeRegistryInternal(registry);
+    return true;
+  } finally {
+    releaseMutex();
+  }
 }
 
 export async function renameFile(metaFileId: string, newName: string): Promise<boolean> {
-  const registry = await readRegistry() ?? {};
-  if (!registry[metaFileId]) return false;
-  registry[metaFileId].fileName = newName;
-  await writeRegistry(registry);
-  return true;
+  await acquireMutex();
+  try {
+    const registry = await readRegistry() ?? {};
+    if (!registry[metaFileId]) return false;
+    registry[metaFileId].fileName = newName;
+    await writeRegistryInternal(registry);
+    return true;
+  } finally {
+    releaseMutex();
+  }
 }
 
 export async function setFileTags(metaFileId: string, tags: string[]): Promise<boolean> {
-  const registry = await readRegistry() ?? {};
-  if (!registry[metaFileId]) return false;
-  registry[metaFileId].tags = tags;
-  await writeRegistry(registry);
-  return true;
+  await acquireMutex();
+  try {
+    const registry = await readRegistry() ?? {};
+    if (!registry[metaFileId]) return false;
+    registry[metaFileId].tags = tags;
+    await writeRegistryInternal(registry);
+    return true;
+  } finally {
+    releaseMutex();
+  }
 }
 
 export async function toggleFavorite(metaFileId: string): Promise<{ success: boolean; favorite?: boolean }> {
-  const registry = await readRegistry() ?? {};
-  if (!registry[metaFileId]) return { success: false };
-  registry[metaFileId].favorite = !registry[metaFileId].favorite;
-  await writeRegistry(registry);
-  return { success: true, favorite: registry[metaFileId].favorite };
+  await acquireMutex();
+  try {
+    const registry = await readRegistry() ?? {};
+    if (!registry[metaFileId]) return { success: false };
+    registry[metaFileId].favorite = !registry[metaFileId].favorite;
+    await writeRegistryInternal(registry);
+    return { success: true, favorite: registry[metaFileId].favorite };
+  } finally {
+    releaseMutex();
+  }
 }
 
 export async function deleteFile(metaFileId: string): Promise<boolean> {
-  const registry = await readRegistry() ?? {};
-  const rec = registry[metaFileId];
-  if (!rec) return false;
+  await acquireMutex();
+  try {
+    const registry = await readRegistry() ?? {};
+    const rec = registry[metaFileId];
+    if (!rec) return false;
 
-  const toDelete = [
-    ...(rec.chunkMessageIds && rec.chunkMessageIds.length > 0 ? rec.chunkMessageIds : [rec.telegramMessageId]),
-    rec.metaMessageId
-  ].filter(id => id > 0);
+    const toDelete = [
+      ...(rec.chunkMessageIds && rec.chunkMessageIds.length > 0 ? rec.chunkMessageIds : [rec.telegramMessageId]),
+      rec.metaMessageId
+    ].filter(id => id > 0);
 
-  await Promise.all(
-    toDelete.map(message_id =>
-      axios.post(`${TELE_API}/deleteMessage`, null, {
-        params: { chat_id: CHAT_ID, message_id }
-      }).then(r => {
-        if (!r.data?.ok) console.error('deleteMessage failed:', message_id, r.data);
-      }).catch(e => console.error('deleteMessage error:', message_id, e?.response?.data || e?.message))
-    )
-  );
+    await Promise.all(
+      toDelete.map(message_id =>
+        axios.post(`${TELE_API}/deleteMessage`, null, {
+          params: { chat_id: CHAT_ID, message_id }
+        }).then(r => {
+          if (!r.data?.ok) console.error('deleteMessage failed:', message_id, r.data);
+        }).catch(e => console.error('deleteMessage error:', message_id, e?.response?.data || e?.message))
+      )
+    );
 
-  delete registry[metaFileId];
-  await writeRegistry(registry);
-  return true;
+    delete registry[metaFileId];
+    await writeRegistryInternal(registry);
+    return true;
+  } finally {
+    releaseMutex();
+  }
 }
 
 /* -------------------- File upload (never pins) -------------------- */
@@ -626,5 +702,7 @@ export default {
   downloadFileFromTelegram,
   writeRegistry,
   uploadFileStream,
-  pinChatMessage
+  pinChatMessage,
+  acquireMutex,
+  releaseMutex
 };
