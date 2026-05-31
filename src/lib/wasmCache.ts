@@ -20,11 +20,11 @@ export type CacheState =
 export const WASM_REGISTRY: Record<string, WasmEntry> = {
   ffmpeg: {
     name: "FFmpeg",
-    key: "ffmpeg-core-st",
+    key: "ffmpeg-core",
     version: "0.12.10",
     urls: {
-      js: "https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.12.10/dist/esm/ffmpeg-core.js",
-      wasm: "https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.12.10/dist/esm/ffmpeg-core.wasm"
+      js: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js",
+      wasm: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm"
     },
     sizeMB: 7
   },
