@@ -2,7 +2,7 @@
 import type { RequestHandler } from './$types';
 import { decrypt } from '$lib/crypto';
 import { getRecordByApiKey } from '$lib/telegramStorage';
-import { NAME } from '$lib/config';
+const NAME = process.env.NAME ?? "Omar";
 
 const BASE_URL =
   import.meta.env.PUBLIC_BASE_URL ?? 'http://localhost:5173';

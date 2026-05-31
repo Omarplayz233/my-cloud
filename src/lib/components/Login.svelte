@@ -1,7 +1,8 @@
 <!-- src/lib/components/Login.svelte -->
 <script lang="ts">
   import { IconCloud } from '@tabler/icons-svelte';
-  import { NAME } from '$lib/config';
+  import { env } from '$env/dynamic/public';
+  const NAME = env.PUBLIC_NAME ?? "Omar";
 
   let {
     onsuccess,
