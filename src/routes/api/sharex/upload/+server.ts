@@ -3,7 +3,6 @@ import type { RequestHandler } from './$types';
 import { decrypt } from '$lib/crypto';
 import {
   getRecordByApiKey,
-  uploadFileToTelegram,
   registerFile,
   readRegistry,
   writeRegistry
@@ -82,6 +81,32 @@ async function getOrCreateSharexFolder(): Promise<string> {
   return folderId;
 }
 
+async function uploadChunkWithRetry(tmpPath: string, filename: string, retries = 3): Promise<{ message_id: number; file_id: string }> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendDocument`, {
+        method: 'POST',
+        body: (() => {
+          const form = new FormData();
+          form.append('chat_id', process.env.TELEGRAM_BACKUP_CHAT_ID!);
+          const blob = new Blob([await fs.promises.readFile(tmpPath)]);
+          form.append('document', blob, filename);
+          return form;
+        })()
+      });
+      const json = await res.json();
+      if (json?.ok) {
+        return { message_id: json.result.message_id, file_id: json.result.document.file_id };
+      }
+      throw new Error(json?.description || 'sendDocument failed');
+    } catch (err: any) {
+      if (attempt === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
+  throw new Error('Upload failed after retries');
+}
+
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const rawKey = (request.headers.get('x-api-key') ?? '').trim();
@@ -98,29 +123,84 @@ export const POST: RequestHandler = async ({ request }) => {
     if (!file) return json({ error: 'No file' }, 400);
 
     const fileName = file.filename.split('/').pop()!;
-    await getOrCreateSharexFolder();
+    const folderId = await getOrCreateSharexFolder();
+    const time = new Date().toISOString();
+    const type = 'application/octet-stream';
+    const totalBytes = file.data.length;
 
-    const total = file.data.length;
-    const chunks = Math.ceil(total / CHUNK_SIZE);
+    const nChunks = Math.max(1, Math.ceil(totalBytes / CHUNK_SIZE));
+    const telegramChunks: { index: number; file_id: string; message_id: number; size: number }[] = [];
 
-    const uploaded = [];
-
-    for (let i = 0; i < chunks; i++) {
+    for (let i = 0; i < nChunks; i++) {
       const slice = file.data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-
       const tmp = path.join(os.tmpdir(), `sx_${Date.now()}_${i}`);
       await fs.promises.writeFile(tmp, slice);
 
-      const res = await uploadFileToTelegram(tmp, fileName);
-      await fs.promises.unlink(tmp).catch(() => {});
-
-      uploaded.push(res);
+      try {
+        const { message_id, file_id } = await uploadChunkWithRetry(tmp, `${fileName}.chunk${i}`);
+        telegramChunks.push({ index: i, file_id, message_id, size: slice.length });
+      } finally {
+        await fs.promises.unlink(tmp).catch(() => {});
+      }
     }
+
+    const chunked = telegramChunks.length > 1;
+    const meta = {
+      fileName,
+      type,
+      time,
+      totalBytes,
+      chunked,
+      ...(chunked
+        ? { chunks: telegramChunks }
+        : { telegramFileId: telegramChunks[0].file_id, telegramMessageId: telegramChunks[0].message_id })
+    };
+
+    const tmpMeta = path.join(os.tmpdir(), `sx_meta_${Date.now()}.json`);
+    await fs.promises.writeFile(tmpMeta, JSON.stringify(meta, null, 2), 'utf8');
+
+    let metaFileId: string;
+    let metaMessageId: number;
+
+    try {
+      const metaRes = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendDocument`, {
+        method: 'POST',
+        body: (() => {
+          const form = new FormData();
+          form.append('chat_id', process.env.TELEGRAM_BACKUP_CHAT_ID!);
+          const blob = new Blob([await fs.promises.readFile(tmpMeta)]);
+          form.append('document', blob, `${fileName}.json`);
+          return form;
+        })()
+      });
+      const metaJson = await metaRes.json();
+      if (!metaJson?.ok) throw new Error('Meta upload failed');
+      metaFileId = metaJson.result.document.file_id;
+      metaMessageId = metaJson.result.message_id;
+    } finally {
+      await fs.promises.unlink(tmpMeta).catch(() => {});
+    }
+
+    await registerFile({
+      fileName,
+      type,
+      totalBytes,
+      time,
+      telegramFileId: chunked ? '' : telegramChunks[0].file_id,
+      telegramMessageId: telegramChunks[0].message_id,
+      metaFileId: metaFileId!,
+      metaMessageId: metaMessageId!,
+      chunked: chunked || undefined,
+      chunkMessageIds: chunked ? telegramChunks.map(c => c.message_id) : undefined,
+      public: true,
+      folderId
+    });
 
     return json({
       url: `${BASE_URL}/sharex/public/${fileName}`
     });
   } catch (err: any) {
+    console.error('sharex upload error:', err?.message || err);
     return json({ error: err?.message ?? 'Internal error' }, 500);
   }
 };

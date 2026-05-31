@@ -13,7 +13,7 @@ import {
   downloadFileFromTelegram
 } from '$lib/telegramStorage';
 import { decrypt } from '$lib/crypto';
-const NAME = process.env.NAME ?? "Omar";
+const NAME = process.env.PUBLIC_NAME ?? "Omar";
 import type { Handle } from '@sveltejs/kit';
 import crypto from 'crypto';
 import { TG_SAFE_CHUNK_BYTES } from '$lib/telegramLimits';
