@@ -308,7 +308,7 @@
 
     const isShape = ["line", "rect", "ellipse", "arrow", "triangle"].includes(tool);
     const isEraserTool = tool === "eraser" || tool === "eraser-artistic";
-    const baseColor = fgColor;
+    const baseColor = isEraserTool ? "black" : fgColor;
 
     if (isShape) {
       currentStroke = {
@@ -473,7 +473,7 @@
     }
 
     if (s.variableWidthPath) {
-      return `<path d="${s.variableWidthPath}" fill="${s.color}" opacity="${op}" fill-rule="evenodd"${artFilter}/>`;
+      return `<path d="${s.variableWidthPath}" fill="${s.color}" opacity="${op}" fill-rule="nonzero"${artFilter}/>`;
     }
 
     if (s.tool === "pencil") {
@@ -488,19 +488,41 @@
     return `<path d="${s.d}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"${artFilter}/>`;
   }
 
+  function isEraserStroke(s: Stroke): boolean {
+    return s.tool === "eraser" || s.tool === "eraser-artistic";
+  }
+
+  function renderEraserInMask(s: Stroke, isPreview: boolean): string {
+    const op = isPreview ? 0.5 : 1;
+    const sw = s.baseWidth;
+    const d = s.d || "";
+    if (s.tool === "eraser-artistic") {
+      if (s.variableWidthPath) return `<path d="${s.variableWidthPath}" fill="black" opacity="${op}" fill-rule="nonzero" filter="url(#eraser-artistic-filter)"/>`;
+      return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}" filter="url(#eraser-artistic-filter)"/>`;
+    }
+    if (s.variableWidthPath) return `<path d="${s.variableWidthPath}" fill="black" opacity="${op}" fill-rule="nonzero"/>`;
+    return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"/>`;
+  }
+
   function renderSvgString(withBg = false): string {
-    let defs = "";
+    const filterDef = `<filter id="eraser-artistic-filter" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="5" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+    let defs = filterDef;
     let inner = "";
     for (const layer of layers) {
       if (!layer.visible) continue;
-      inner += `<g opacity="${layer.opacity / 100}">`;
-      for (const s of layer.strokes) inner += renderStroke(s, false);
+      const hasEraser = layer.strokes.some(s => isEraserStroke(s));
+      if (hasEraser) {
+        defs += `<mask id="mask-${layer.id}"><rect width="100%" height="100%" fill="white"/>`;
+        for (const s of layer.strokes) { if (isEraserStroke(s)) defs += renderEraserInMask(s, false); }
+        defs += `</mask>`;
+      }
+      inner += `<g opacity="${layer.opacity / 100}"${hasEraser ? ` mask="url(#mask-${layer.id})"` : ""}>`;
+      for (const s of layer.strokes) { if (!isEraserStroke(s)) inner += renderStroke(s, false); }
       inner += "</g>";
     }
-    if (currentStroke) inner += renderStroke(currentStroke, true);
+    if (currentStroke && !isEraserStroke(currentStroke)) inner += renderStroke(currentStroke, true);
     const bg = withBg ? `<rect width="100%" height="100%" fill="${bgColor2}"/>` : "";
-    const filterDef = `<filter id="eraser-artistic-filter" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="5" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G"/></filter>`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><defs>${filterDef}</defs>${bg}${inner}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><defs>${defs}</defs>${bg}${inner}</svg>`;
   }
 
   // ── Save / Download ─────────────────────────────────────────────────
@@ -997,6 +1019,17 @@
                 <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="5" result="noise"/>
                 <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G"/>
               </filter>
+              {#each layers as layer (layer.id)}
+                <mask id="mask-{layer.id}">
+                  <rect width="100%" height="100%" fill="white"/>
+                  {#each layer.strokes.filter(s => isEraserStroke(s)) as s (s.id)}
+                    {@html renderEraserInMask(s, false)}
+                  {/each}
+                  {#if currentStroke && isEraserStroke(currentStroke) && currentStroke.layerId === layer.id}
+                    {@html renderEraserInMask(currentStroke, true)}
+                  {/if}
+                </mask>
+              {/each}
             </defs>
             <rect width="100%" height="100%" fill={bgColor2}/>
             {#if settings.checkerBg}
@@ -1005,15 +1038,18 @@
 
             {#each layers as layer (layer.id)}
               {#if layer.visible}
-                <g opacity={layer.opacity / 100}>
+                {@const hasEraser = layer.strokes.some(s => isEraserStroke(s)) || (currentStroke && isEraserStroke(currentStroke) && currentStroke.layerId === layer.id)}
+                <g opacity={layer.opacity / 100} mask={hasEraser ? `url(#mask-${layer.id})` : undefined}>
                   {#each layer.strokes as s (s.id)}
-                    {@html renderStroke(s, false)}
+                    {#if !isEraserStroke(s)}
+                      {@html renderStroke(s, false)}
+                    {/if}
                   {/each}
                 </g>
               {/if}
             {/each}
 
-            {#if currentStroke}
+            {#if currentStroke && !isEraserStroke(currentStroke)}
               {@html renderStroke(currentStroke, true)}
             {/if}
           </svg>

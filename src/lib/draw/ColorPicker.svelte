@@ -67,6 +67,7 @@
     const angle = Math.atan2(dy, dx);
     hsl.h = ((angle * 180 / Math.PI) + 360) % 360;
     hsl.s = Math.round((clampedDist / radius) * 100);
+    if (hsl.l === 0) hsl.l = 50;
     updateFromHsl();
   }
 
@@ -83,6 +84,7 @@
     const rect = hueEl.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     hsl.h = Math.round(x * 360);
+    if (hsl.l === 0) hsl.l = 50;
     updateFromHsl();
   }
 

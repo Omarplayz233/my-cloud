@@ -298,8 +298,8 @@ export function shapeAttrs(s: Stroke) {
     case "arrow": {
       const angle = Math.atan2(s.ey - s.sy, s.ex - s.sx);
       const len = Math.sqrt(Math.abs(s.ex - s.sx) ** 2 + Math.abs(s.ey - s.sy) ** 2);
-      const headLen = Math.min(len * 0.35, sw * 4);
-      const headW = headLen * 0.65;
+      const headLen = Math.min(len * 0.25, Math.max(sw * 2, 10));
+      const headW = headLen * 0.5;
       const a = Math.PI / 2;
       // Filled arrowhead
       const hx = s.ex - headLen * Math.cos(angle);
