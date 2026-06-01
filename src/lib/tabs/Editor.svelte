@@ -96,7 +96,7 @@
       fd.append("file", blob, name);
       const up = await fetch("/api/telegram/uploadFile", {
         method: "POST", body: fd,
-        headers: { "X-Api-Key": apiKey },
+        headers: { "X-Api-Key": apiKey, "X-File-Request": encodeURIComponent(name) },
       });
       if (!up.ok) throw new Error(`Upload failed: ${up.status}`);
       saveOk = true;

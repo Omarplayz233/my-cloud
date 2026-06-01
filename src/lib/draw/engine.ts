@@ -310,6 +310,7 @@ export function shapeAttrs(s: Stroke) {
       const ry = hy - headW * Math.sin(angle + a);
       return {
         x1: s.sx, y1: s.sy, x2: hx, y2: hy,
+        tipX: s.ex, tipY: s.ey,
         headX1: lx, headY1: ly, headX2: rx, headY2: ry,
         headLen, headW,
       };

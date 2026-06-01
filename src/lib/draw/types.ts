@@ -1,5 +1,5 @@
 export type Tool =
-  | "move" | "select" | "pen" | "pencil" | "brush" | "eraser"
+  | "move" | "select" | "pen" | "pencil" | "brush" | "eraser" | "eraser-artistic"
   | "line" | "rect" | "ellipse" | "arrow" | "triangle"
   | "eyedropper" | "fill" | "text";
 
