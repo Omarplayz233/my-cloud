@@ -52,7 +52,7 @@
       { id: "pencil", label: "Pencil (N)", key: "n" },
       { id: "pen", label: "Pen (P)", key: "p" },
       { id: "eraser", label: "Eraser (E)", key: "e" },
-      { id: "eraser-artistic", label: "Artistic Eraser (Shift+E)", key: "" },
+      { id: "chalk", label: "Chalk (C)", key: "c" },
     ]},
     { group: "shape", tools: [
       { id: "line", label: "Line (L)", key: "l" },
@@ -356,7 +356,7 @@
     pressure = e.pressure || 0.5;
 
     const isShape = ["line", "rect", "ellipse", "arrow", "triangle"].includes(tool);
-    const isEraserTool = tool === "eraser" || tool === "eraser-artistic";
+    const isEraserTool = tool === "eraser";
     const baseColor = isEraserTool ? "black" : fgColor;
 
     if (isShape) {
@@ -543,7 +543,7 @@
   // ── Render stroke to SVG ────────────────────────────────────────────
   function renderStroke(s: Stroke, isPreview: boolean): string {
     const op = isPreview ? 0.5 : s.opacity;
-    const artFilter = s.tool === "eraser-artistic" ? ' filter="url(#eraser-artistic-filter)"' : "";
+    const artFilter = s.tool === "chalk" ? ' filter="url(#chalk-filter)"' : "";
     const sidAttr = isPreview ? "" : ` data-sid="${s.id}" style="cursor:pointer"`;
 
     let inner = "";
@@ -592,37 +592,37 @@
   }
 
   function isEraserStroke(s: Stroke): boolean {
-    return s.tool === "eraser" || s.tool === "eraser-artistic";
+    return s.tool === "eraser";
   }
 
-  function renderEraserInMask(s: Stroke, _isPreview: boolean): string {
+  function renderEraserInMask(s: Stroke): string {
     const sw = s.baseWidth;
     const d = s.d || "";
-    if (s.tool === "eraser-artistic") {
-      return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="1" filter="url(#eraser-artistic-filter)"/>`;
-    }
     return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`;
   }
 
   function renderLayerEraserSvg(layer: Layer): string {
+    const eraserStrokes = layer.strokes.filter(s => isEraserStroke(s));
+    const drawStrokes = layer.strokes.filter(s => !isEraserStroke(s));
+
     let out = "";
-    let inEraser = false;
-    for (const s of layer.strokes) {
-      if (isEraserStroke(s)) {
-        if (!inEraser) { out += `<g style="mix-blend-mode:destination-out">`; inEraser = true; }
-        out += renderEraserInMask(s, false);
-      } else {
-        if (inEraser) { out += `</g>`; inEraser = false; }
-        out += renderStroke(s, false);
-      }
+    if (eraserStrokes.length > 0) {
+      out += `<defs><mask id="emask-${layer.id}">`;
+      out += `<rect width="${w}" height="${h}" fill="white"/>`;
+      for (const s of eraserStrokes) out += renderEraserInMask(s);
+      out += `</mask></defs>`;
+      out += `<g mask="url(#emask-${layer.id})">`;
+      for (const s of drawStrokes) out += renderStroke(s, false);
+      out += `</g>`;
+    } else {
+      for (const s of drawStrokes) out += renderStroke(s, false);
     }
-    if (inEraser) out += `</g>`;
     return out;
   }
 
   function renderSvgString(withBg = false): string {
-    const filterDef = `<filter id="eraser-artistic-filter" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="5" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G"/></filter>`;
-    let defs = filterDef;
+    const chalkFilter = `<filter id="chalk-filter" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="5" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="3" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+    let defs = chalkFilter;
     let inner = "";
     for (const layer of layers) {
       if (!layer.visible) continue;
@@ -781,7 +781,6 @@
     if (key === "[") { lineWidth = Math.max(0.5, lineWidth - 1); return; }
     if (key === "]") { lineWidth = Math.min(200, lineWidth + 1); return; }
     if (key === "e" && !e.shiftKey) { tool = "eraser"; return; }
-    if (key === "e" && e.shiftKey) { tool = "eraser-artistic"; return; }
     if (key === "x") { swapColors(); return; }
     if (key === "g") { settings.showGrid = !settings.showGrid; return; }
     if (key === "r") { settings.showRulers = !settings.showRulers; return; }
@@ -1019,7 +1018,7 @@
             {#if t.id === "move"}<IconPointer size={16}/>{:else if t.id === "select"}<IconSelector size={16}/>
             {:else if t.id === "brush"}<IconBrush size={16}/>{:else if t.id === "pencil"}<IconPencil size={16}/>
             {:else if t.id === "pen"}<IconPencil size={16}/>{:else if t.id === "eraser"}<IconEraser size={16}/>
-            {:else if t.id === "eraser-artistic"}<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 14L6 10"/><path d="M8 2l1.5 3.5L13 7l-3.5 1.5L8 12 6.5 8.5 3 7z"/></svg>
+            {:else if t.id === "chalk"}<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 13L13 3"/><path d="M11 2l2 2-1 1-2-2z" fill="currentColor" stroke="none"/><path d="M3 13l-1 2 2-1z" fill="currentColor" stroke="none"/></svg>
             {:else if t.id === "line"}<IconMinus size={16}/>{:else if t.id === "rect"}<IconSquare size={16}/>
             {:else if t.id === "ellipse"}<IconCircle size={16}/>{:else if t.id === "arrow"}<IconArrowBadgeRight size={16}/>
             {:else if t.id === "triangle"}<IconTriangle size={16}/>{:else if t.id === "eyedropper"}<IconColorPicker size={16}/>
@@ -1053,7 +1052,7 @@
           <input type="range" min="1" max="100" bind:value={opacity} class="ob-slider"/>
           <span class="ob-val">{opacity}%</span>
         </label>
-        {#if ["brush","pencil","pen","eraser","eraser-artistic"].includes(tool)}
+        {#if ["brush","pencil","pen","eraser","chalk"].includes(tool)}
           <label class="ob-label">Hardness
             <input type="range" min="1" max="100" bind:value={hardness} class="ob-slider"/>
             <span class="ob-val">{hardness}</span>
@@ -1092,7 +1091,7 @@
           <label class="ob-check"><input type="checkbox" bind:checked={fillShapes}/> Fill</label>
         {/if}
         <div class="ob-spacer"></div>
-        {#if ["brush","pencil","pen","eraser","eraser-artistic"].includes(tool)}
+        {#if ["brush","pencil","pen","eraser","chalk"].includes(tool)}
           <div class="ob-presets">
             {#each filteredPresets as p, i}
               <button class="ob-preset" class:active={activePresetIdx === BRUSH_PRESETS.indexOf(p)} onclick={() => applyPreset(p)} title={p.name}>
@@ -1154,9 +1153,9 @@
                 <rect width="8" height="8" fill="#222"/>
                 <rect x="8" y="8" width="8" height="8" fill="#222"/>
               </pattern>
-              <filter id="eraser-artistic-filter" x="-20%" y="-20%" width="140%" height="140%">
+              <filter id="chalk-filter" x="-20%" y="-20%" width="140%" height="140%">
                 <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" seed="5" result="noise"/>
-                <feDisplacementMap in="SourceGraphic" in2="noise" scale="4" xChannelSelector="R" yChannelSelector="G"/>
+                <feDisplacementMap in="SourceGraphic" in2="noise" scale="3" xChannelSelector="R" yChannelSelector="G"/>
               </filter>
             </defs>
             <rect width="100%" height="100%" fill={bgColor2}/>
@@ -1166,14 +1165,27 @@
 
             {#each layers as layer (layer.id)}
               {#if layer.visible}
-                <g style="isolation: isolate" opacity={layer.opacity / 100}>
-                  {@html renderLayerEraserSvg(layer)}
-                  {#if currentStroke && isEraserStroke(currentStroke) && currentStroke.layerId === layer.id}
-                    <g style="mix-blend-mode:destination-out">
-                      {@html renderEraserInMask(currentStroke, true)}
-                    </g>
-                  {/if}
-                </g>
+                {@const hasLiveEraser = currentStroke && isEraserStroke(currentStroke) && currentStroke.layerId === layer.id}
+                {#if hasLiveEraser}
+                  <defs>
+                    <mask id="live-eraser-mask-{layer.id}">
+                      <rect width="{w}" height="{h}" fill="white"/>
+                      {#each layer.strokes.filter(s => isEraserStroke(s)) as s}
+                        <path d={s.d} fill="none" stroke="black" stroke-width={s.baseWidth} stroke-linecap="round"/>
+                      {/each}
+                      <path d={currentStroke.d} fill="none" stroke="black" stroke-width={currentStroke.baseWidth} stroke-linecap="round"/>
+                    </mask>
+                  </defs>
+                  <g style="isolation: isolate" opacity={layer.opacity / 100} mask="url(#live-eraser-mask-{layer.id})">
+                    {#each layer.strokes.filter(s => !isEraserStroke(s)) as s (s.id)}
+                      {@html renderStroke(s, false)}
+                    {/each}
+                  </g>
+                {:else}
+                  <g style="isolation: isolate" opacity={layer.opacity / 100}>
+                    {@html renderLayerEraserSvg(layer)}
+                  </g>
+                {/if}
               {/if}
             {/each}
 
@@ -1212,7 +1224,7 @@
                   top:{cursorScreenY - wrapRect.top}px;
                   width:{lineWidth * zoom}px;
                   height:{lineWidth * zoom}px;
-                  border-color:{tool === 'eraser' ? '#ff4444' : tool === 'eraser-artistic' ? '#ff8844' : 'rgba(255,255,255,0.6)'};
+                  border-color:{tool === 'eraser' ? '#ff4444' : 'rgba(255,255,255,0.6)'};
                   opacity:{drawing ? 0.3 : 0.7};
                 "
               ></div>
