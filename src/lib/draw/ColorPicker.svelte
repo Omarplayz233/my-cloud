@@ -192,7 +192,7 @@
   <!-- Swatches -->
   <div class="cp-swatches">
     {#each SWATCHES as c}
-      <button class="cp-swatch" style="background:{c}" onclick={() => { value = c; hexInput = c; addToRecent(c); }}></button>
+      <button class="cp-swatch" class:active={value.toLowerCase() === c.toLowerCase()} style="background:{c}" onclick={() => { value = c; hexInput = c; addToRecent(c); }}></button>
     {/each}
   </div>
 
@@ -277,4 +277,5 @@
     cursor: pointer; transition: .1s;
   }
   .cp-swatch:hover { border-color: #aaa; transform: scale(1.2); z-index: 1; }
+  .cp-swatch.active { border-color: #fff; box-shadow: 0 0 0 2px #6366f1; transform: scale(1.15); z-index: 1; }
 </style>
