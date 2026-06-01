@@ -492,16 +492,13 @@
     return s.tool === "eraser" || s.tool === "eraser-artistic";
   }
 
-  function renderEraserInMask(s: Stroke, isPreview: boolean): string {
-    const op = isPreview ? 0.5 : 1;
+  function renderEraserInMask(s: Stroke, _isPreview: boolean): string {
     const sw = s.baseWidth;
     const d = s.d || "";
     if (s.tool === "eraser-artistic") {
-      if (s.variableWidthPath) return `<path d="${s.variableWidthPath}" fill="black" opacity="${op}" fill-rule="nonzero" filter="url(#eraser-artistic-filter)"/>`;
-      return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}" filter="url(#eraser-artistic-filter)"/>`;
+      return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="1" filter="url(#eraser-artistic-filter)"/>`;
     }
-    if (s.variableWidthPath) return `<path d="${s.variableWidthPath}" fill="black" opacity="${op}" fill-rule="nonzero"/>`;
-    return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"/>`;
+    return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`;
   }
 
   function renderSvgString(withBg = false): string {
