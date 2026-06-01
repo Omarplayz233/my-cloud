@@ -9,6 +9,7 @@
   import Draw       from '$lib/draw/Draw.svelte';
   import Editor     from '$lib/tabs/Editor.svelte';
   import VideoEditor from '$lib/tabs/VideoEditor.svelte';
+  import MusicEditor from '$lib/tabs/MusicEditor.svelte';
   import Stats      from '$lib/tabs/Stats.svelte';
   import Vault	    from '$lib/tabs/Vault.svelte';
   import { env } from '$env/dynamic/public';
@@ -20,7 +21,7 @@
   let encryptedApiKey = $derived(data.encryptedApiKey);
 
   // Tab state
-  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault' | 'video';
+  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault' | 'video' | 'music';
   let activeTab = $state<Tab>('files');
   let editorFile = $state<{ metaFileId: string; fileName: string } | null>(null);
   let filesRefreshNonce = $state(0);
@@ -151,6 +152,8 @@
         <Draw {apiKey} />
       {:else if activeTab === 'video'}
         <VideoEditor {apiKey} />
+      {:else if activeTab === 'music'}
+        <MusicEditor {apiKey} />
       {:else if activeTab === 'stats'}
         <Stats {apiKey} />
       {:else if activeTab === 'editor'}
