@@ -240,6 +240,13 @@
     layers = [...layers];
   }
 
+  // ── Selection ─────────────────────────────────────────────────────
+  let selectedIds = $state<Set<string>>(new Set());
+  let selectDragStart = $state<{x:number;y:number} | null>(null);
+  let selectDragOffsets = $state<Map<string,{dx:number;dy:number}>>(new Map());
+  let marqueeStart = $state<{x:number;y:number} | null>(null);
+  let marqueeEnd = $state<{x:number;y:number} | null>(null);
+
   // ── Strokes ─────────────────────────────────────────────────────────
   let drawing = $state(false);
   let currentStroke = $state<Stroke | null>(null);
@@ -280,7 +287,48 @@
     }
 
     if (tool === "eyedropper") { pickColor(e); return; }
-    if (tool === "select") return;
+    if (tool === "select") {
+      const els = document.elementsFromPoint(e.clientX, e.clientY);
+      let hitId: string | null = null;
+      for (const el of els) {
+        let node: Element | null = el;
+        while (node && node !== svgEl) {
+          const sid = node.getAttribute("data-sid");
+          if (sid) { hitId = sid; break; }
+          node = node.parentElement;
+        }
+        if (hitId) break;
+      }
+      if (hitId) {
+        if (e.shiftKey) {
+          if (selectedIds.has(hitId)) selectedIds.delete(hitId); else selectedIds.add(hitId);
+        } else {
+          if (!selectedIds.has(hitId)) { selectedIds.clear(); selectedIds.add(hitId); }
+        }
+        selectedIds = selectedIds;
+        selectDragStart = { x: e.clientX, y: e.clientY };
+        const layer = getActiveLayer();
+        selectDragOffsets = new Map();
+        for (const id of selectedIds) {
+          const s = layer.strokes.find(st => st.id === id);
+          if (s) {
+            if (s.shapeType) selectDragOffsets.set(id, { dx: 0, dy: 0 });
+            else {
+              const pts = s.points;
+              const minX = Math.min(...pts.map(p => p.x));
+              const minY = Math.min(...pts.map(p => p.y));
+              selectDragOffsets.set(id, { dx: -minX, dy: -minY });
+            }
+          }
+        }
+      } else {
+        if (!e.shiftKey) selectedIds.clear();
+        selectedIds = selectedIds;
+        marqueeStart = { x: e.clientX, y: e.clientY };
+        marqueeEnd = { x: e.clientX, y: e.clientY };
+      }
+      return;
+    }
 
     if (tool === "text") {
       const pt = svgPoint(e);
@@ -344,6 +392,34 @@
       return;
     }
 
+    if (tool === "select" && marqueeStart) {
+      marqueeEnd = { x: e.clientX, y: e.clientY };
+      return;
+    }
+
+    if (tool === "select" && selectDragStart && selectedIds.size > 0) {
+      const dx = (e.clientX - selectDragStart.x) / zoom;
+      const dy = (e.clientY - selectDragStart.y) / zoom;
+      const layer = getActiveLayer();
+      for (const id of selectedIds) {
+        const s = layer.strokes.find(st => st.id === id);
+        if (!s) continue;
+        if (s.shapeType) {
+          s.sx! += dx; s.sy! += dy; s.ex! += dx; s.ey! += dy;
+        } else {
+          for (const p of s.points) { p.x += dx; p.y += dy; }
+          if (s.d) {
+            s.d = s.d.replace(/([ML])(-?[\d.]+),(-?[\d.]+)/g, (_, cmd, x, y) => {
+              return `${cmd}${(parseFloat(x) + dx).toFixed(1)},${(parseFloat(y) + dy).toFixed(1)}`;
+            });
+          }
+        }
+      }
+      selectDragStart = { x: e.clientX, y: e.clientY };
+      layers = [...layers];
+      return;
+    }
+
     if (!drawing || !currentStroke) return;
 
     const raw = snapToGrid(pt);
@@ -376,6 +452,31 @@
 
   function pointerUp(_e: PointerEvent) {
     if (panning) { panning = false; return; }
+    if (tool === "select") {
+      if (marqueeStart && marqueeEnd) {
+        const svgRect = svgEl.getBoundingClientRect();
+        const x1 = (Math.min(marqueeStart.x, marqueeEnd.x) - svgRect.left) / zoom;
+        const y1 = (Math.min(marqueeStart.y, marqueeEnd.y) - svgRect.top) / zoom;
+        const x2 = (Math.max(marqueeStart.x, marqueeEnd.x) - svgRect.left) / zoom;
+        const y2 = (Math.max(marqueeStart.y, marqueeEnd.y) - svgRect.top) / zoom;
+        if (x2 - x1 > 3 || y2 - y1 > 3) {
+          const layer = getActiveLayer();
+          for (const s of layer.strokes) {
+            const bbox = getStrokeBBox(s);
+            if (!bbox) continue;
+            if (bbox.x < x2 && bbox.x + bbox.w > x1 && bbox.y < y2 && bbox.y + bbox.h > y1) {
+              selectedIds.add(s.id);
+            }
+          }
+          selectedIds = selectedIds;
+        }
+        marqueeStart = null;
+        marqueeEnd = null;
+      }
+      selectDragStart = null;
+      selectDragOffsets = new Map();
+      return;
+    }
     if (!drawing || !currentStroke) return;
     drawing = false;
 
@@ -443,25 +544,30 @@
   function renderStroke(s: Stroke, isPreview: boolean): string {
     const op = isPreview ? 0.5 : s.opacity;
     const artFilter = s.tool === "eraser-artistic" ? ' filter="url(#eraser-artistic-filter)"' : "";
+    const sidAttr = isPreview ? "" : ` data-sid="${s.id}" style="cursor:pointer"`;
 
+    let inner = "";
     if (s.shapeType) {
       const a = shapeAttrs(s);
       const sw = s.baseWidth;
       switch (s.shapeType) {
         case "line":
-          return `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="round" opacity="${op}"/>`;
+          inner = `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="round" opacity="${op}"/>`;
+          break;
         case "rect":
-          return `<rect x="${a.x}" y="${a.y}" width="${a.width}" height="${a.height}" fill="${s.fill ? s.color : 'none'}" stroke="${s.fill ? 'none' : s.color}" stroke-width="${sw}" opacity="${op}" rx="1"/>`;
+          inner = `<rect x="${a.x}" y="${a.y}" width="${a.width}" height="${a.height}" fill="${s.fill ? s.color : 'none'}" stroke="${s.fill ? 'none' : s.color}" stroke-width="${sw}" opacity="${op}" rx="1"/>`;
+          break;
         case "ellipse":
-          return `<ellipse cx="${a.cx}" cy="${a.cy}" rx="${a.rx}" ry="${a.ry}" fill="${s.fill ? s.color : 'none'}" stroke="${s.fill ? 'none' : s.color}" stroke-width="${sw}" opacity="${op}"/>`;
+          inner = `<ellipse cx="${a.cx}" cy="${a.cy}" rx="${a.rx}" ry="${a.ry}" fill="${s.fill ? s.color : 'none'}" stroke="${s.fill ? 'none' : s.color}" stroke-width="${sw}" opacity="${op}"/>`;
+          break;
         case "arrow":
-          return `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="butt" opacity="${op}"/><polygon points="${a.tipX},${a.tipY} ${a.headX1},${a.headY1} ${a.headX2},${a.headY2}" fill="${s.color}" opacity="${op}" stroke-linejoin="round"/>`;
+          inner = `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${s.color}" stroke-width="${sw}" stroke-linecap="butt" opacity="${op}"/><polygon points="${a.tipX},${a.tipY} ${a.headX1},${a.headY1} ${a.headX2},${a.headY2}" fill="${s.color}" opacity="${op}" stroke-linejoin="round"/>`;
+          break;
         case "triangle":
-          return `<polygon points="${a.points}" fill="${s.fill ? s.color : 'none'}" stroke="${s.fill ? 'none' : s.color}" stroke-width="${sw}" stroke-linejoin="round" opacity="${op}"/>`;
+          inner = `<polygon points="${a.points}" fill="${s.fill ? s.color : 'none'}" stroke="${s.fill ? 'none' : s.color}" stroke-width="${sw}" stroke-linejoin="round" opacity="${op}"/>`;
+          break;
       }
-    }
-
-    if (s.text) {
+    } else if (s.text) {
       const anchor = s.textAlign === "center" ? "middle" : s.textAlign === "right" ? "end" : "start";
       const lines = s.text.split("\n");
       const lh = (s.fontSize ?? 32) * 1.2;
@@ -470,23 +576,19 @@
         const escaped = escapeXml(lines[i]);
         txt += `<tspan x="${s.points[0]?.x}" dy="${i === 0 ? 0 : lh}">${escaped}</tspan>`;
       }
-      return `<text x="${s.points[0]?.x}" y="${s.points[0]?.y}" fill="${s.color}" font-size="${s.fontSize ?? 32}" font-family="${s.fontFamily ?? 'sans-serif'}" font-weight="${s.fontWeight ?? '400'}" font-style="${s.fontStyle ?? 'normal'}" text-anchor="${anchor}" opacity="${op}" dominant-baseline="auto">${txt}</text>`;
-    }
-
-    if (s.variableWidthPath) {
-      return `<path d="${s.variableWidthPath}" fill="${s.color}" opacity="${op}" fill-rule="nonzero"${artFilter}/>`;
-    }
-
-    if (s.tool === "pencil") {
-      let r = "";
+      inner = `<text x="${s.points[0]?.x}" y="${s.points[0]?.y}" fill="${s.color}" font-size="${s.fontSize ?? 32}" font-family="${s.fontFamily ?? 'sans-serif'}" font-weight="${s.fontWeight ?? '400'}" font-style="${s.fontStyle ?? 'normal'}" text-anchor="${anchor}" opacity="${op}" dominant-baseline="auto">${txt}</text>`;
+    } else if (s.variableWidthPath) {
+      inner = `<path d="${s.variableWidthPath}" fill="${s.color}" opacity="${op}" fill-rule="nonzero"${artFilter}/>`;
+    } else if (s.tool === "pencil") {
       for (const pd of s.pencilPaths ?? []) {
-        r += `<path d="${pd}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth * 0.35}" stroke-linecap="round" stroke-linejoin="round" opacity="${op * 0.5}"/>`;
+        inner += `<path d="${pd}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth * 0.35}" stroke-linecap="round" stroke-linejoin="round" opacity="${op * 0.5}"/>`;
       }
-      r += `<path d="${s.d}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth * 0.3}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"/>`;
-      return r;
+      inner += `<path d="${s.d}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth * 0.3}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"/>`;
+    } else {
+      inner = `<path d="${s.d}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"${artFilter}/>`;
     }
 
-    return `<path d="${s.d}" fill="none" stroke="${s.color}" stroke-width="${s.baseWidth}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"${artFilter}/>`;
+    return `<g${sidAttr}>${inner}</g>`;
   }
 
   function isEraserStroke(s: Stroke): boolean {
@@ -633,6 +735,22 @@
   // ── Helpers ─────────────────────────────────────────────────────────
   function uid(): string { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
+  function getStrokeBBox(s: Stroke): { x: number; y: number; w: number; h: number } | null {
+    if (s.shapeType) {
+      const x = Math.min(s.sx ?? 0, s.ex ?? 0);
+      const y = Math.min(s.sy ?? 0, s.ey ?? 0);
+      return { x, y, w: Math.abs((s.ex ?? 0) - (s.sx ?? 0)), h: Math.abs((s.ey ?? 0) - (s.sy ?? 0)) };
+    }
+    if (s.points.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of s.points) {
+      if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+    }
+    const hw = s.baseWidth / 2;
+    return { x: minX - hw, y: minY - hw, w: maxX - minX + s.baseWidth, h: maxY - minY + s.baseWidth };
+  }
+
   // ── Keyboard ────────────────────────────────────────────────────────
   function onkeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -645,6 +763,19 @@
       if (e.key === "-") { e.preventDefault(); zoomTo(Math.max(MIN_ZOOM, zoom / 1.5)); return; }
     }
     if (e.key === "Shift") { shiftHeld = true; return; }
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
+      e.preventDefault();
+      const layer = getActiveLayer();
+      const deleted = layer.strokes.filter(s => selectedIds.has(s.id));
+      if (deleted.length) {
+        pushHistory({ action: "stroke", layerId: layer.id, strokes: deleted });
+        layer.strokes = layer.strokes.filter(s => !selectedIds.has(s.id));
+        selectedIds.clear(); selectedIds = selectedIds;
+        layers = [...layers];
+      }
+      return;
+    }
+    if (e.key === "Escape") { selectedIds.clear(); selectedIds = selectedIds; return; }
     const key = e.key.toLowerCase();
     for (const g of TOOL_GROUPS) for (const t of g.tools) { if (t.key === key) { tool = t.id as Tool; return; } }
     if (key === "[") { lineWidth = Math.max(0.5, lineWidth - 1); return; }
@@ -1046,12 +1177,31 @@
               {/if}
             {/each}
 
+            {#if selectedIds.size > 0}
+              {@const layer = getActiveLayer()}
+              {#each layer.strokes.filter(s => selectedIds.has(s.id)) as s (s.id)}
+                {@const bbox = getStrokeBBox(s)}
+                {#if bbox}
+                  <rect x={bbox.x - 2} y={bbox.y - 2} width={bbox.w + 4} height={bbox.h + 4} fill="none" stroke="#4488ff" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/>
+                {/if}
+              {/each}
+            {/if}
+
+            {#if marqueeStart && marqueeEnd}
+              {@const svgRect2 = svgEl.getBoundingClientRect()}
+              {@const mx1 = (Math.min(marqueeStart.x, marqueeEnd.x) - svgRect2.left) / zoom}
+              {@const my1 = (Math.min(marqueeStart.y, marqueeEnd.y) - svgRect2.top) / zoom}
+              {@const mw = Math.abs(marqueeEnd.x - marqueeStart.x) / zoom}
+              {@const mh = Math.abs(marqueeEnd.y - marqueeStart.y) / zoom}
+              <rect x={mx1} y={my1} width={mw} height={mh} fill="rgba(68,136,255,0.08)" stroke="#4488ff" stroke-width="1" stroke-dasharray="5 3" pointer-events="none"/>
+            {/if}
+
             {#if currentStroke && !isEraserStroke(currentStroke)}
               {@html renderStroke(currentStroke, true)}
             {/if}
           </svg>
 
-          {#if hovering && !panning && svgEl}
+          {#if hovering && !panning && svgEl && tool !== "select"}
             {@const svgRect = svgEl.getBoundingClientRect()}
             {@const wrapRect = canvasWrap?.getBoundingClientRect()}
             {#if wrapRect}
