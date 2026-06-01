@@ -240,6 +240,112 @@
     layers = [...layers];
   }
 
+  // ── Image import ────────────────────────────────────────────────────
+  let fileInputEl: HTMLInputElement | null = null;
+
+  function importImage() {
+    fileInputEl?.click();
+  }
+
+  function handleImageFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    input.value = "";
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        let iw = img.naturalWidth;
+        let ih = img.naturalHeight;
+        const maxDim = Math.max(w, h) * 0.8;
+        if (iw > maxDim || ih > maxDim) {
+          const scale = maxDim / Math.max(iw, ih);
+          iw *= scale;
+          ih *= scale;
+        }
+        const s: Stroke = {
+          id: "img_" + Date.now().toString(36),
+          tool: "brush",
+          color: "#000000",
+          baseWidth: 0,
+          opacity: 1,
+          fill: false,
+          points: [{ x: (w - iw) / 2, y: (h - ih) / 2, pressure: 0.5, time: performance.now() }],
+          imageData: dataUrl,
+          imageW: iw,
+          imageH: ih,
+          layerId: getActiveLayer().id,
+        };
+        getActiveLayer().strokes = [...getActiveLayer().strokes, s];
+        pushHistory({ action: "stroke", layerId: s.layerId, strokes: [s] });
+        layers = [...layers];
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ── Canvas resize dialog ────────────────────────────────────────────
+  let showResizeDialog = $state(false);
+  let resizeW = $state(1200);
+  let resizeH = $state(800);
+  let resizeScale = $state(true);
+
+  function openResizeDialog() {
+    resizeW = w;
+    resizeH = h;
+    showResizeDialog = true;
+  }
+
+  function applyResize() {
+    const nw = Math.max(1, Math.round(resizeW));
+    const nh = Math.max(1, Math.round(resizeH));
+    if (resizeScale && (nw !== w || nh !== h)) {
+      const sx = nw / w;
+      const sy = nh / h;
+      for (const layer of layers) {
+        for (const s of layer.strokes) {
+          if (s.imageData) {
+            s.points[0] = { ...s.points[0], x: s.points[0].x * sx, y: s.points[0].y * sy };
+            s.imageW = (s.imageW ?? 0) * sx;
+            s.imageH = (s.imageH ?? 0) * sy;
+          } else if (s.shapeType) {
+            s.sx = (s.sx ?? 0) * sx; s.sy = (s.sy ?? 0) * sy;
+            s.ex = (s.ex ?? 0) * sx; s.ey = (s.ey ?? 0) * sy;
+          } else {
+            for (const p of s.points) { p.x *= sx; p.y *= sy; }
+            if (s.d) s.d = s.d.replace(/(-?[\d.]+),(-?[\d.]+)/g, (_, x, y) => `${(parseFloat(x) * sx).toFixed(1)},${(parseFloat(y) * sy).toFixed(1)}`);
+            if (s.variableWidthPath) s.variableWidthPath = s.variableWidthPath.replace(/(-?[\d.]+),(-?[\d.]+)/g, (_, x, y) => `${(parseFloat(x) * sx).toFixed(1)},${(parseFloat(y) * sy).toFixed(1)}`);
+          }
+        }
+      }
+    }
+    w = nw;
+    h = nh;
+    showResizeDialog = false;
+    layers = [...layers];
+  }
+
+  // ── Save-to-cloud dialog ────────────────────────────────────────────
+  let showSaveDialog = $state(false);
+  let saveFolder = $state("");
+  let saveFileName = $state("drawing.png");
+
+  function openSaveDialog() {
+    saveFileName = "drawing.png";
+    saveFolder = "";
+    showSaveDialog = true;
+  }
+
+  async function confirmSaveToCloud() {
+    showSaveDialog = false;
+    const fullName = saveFolder ? `${saveFolder}/${saveFileName}` : saveFileName;
+    saveName = fullName;
+    await saveToCloud();
+  }
+
   // ── Selection ─────────────────────────────────────────────────────
   let selectedIds = $state<Set<string>>(new Set());
   let selectDragStart = $state<{x:number;y:number} | null>(null);
@@ -546,6 +652,14 @@
     const artFilter = s.tool === "chalk" ? ' filter="url(#chalk-filter)"' : "";
     const sidAttr = isPreview ? "" : ` data-sid="${s.id}" style="cursor:pointer"`;
 
+    if (s.imageData && s.points[0]) {
+      const x = s.points[0].x;
+      const y = s.points[0].y;
+      const iw = s.imageW ?? 100;
+      const ih = s.imageH ?? 100;
+      return `<g${sidAttr}><image href="${s.imageData}" x="${x}" y="${y}" width="${iw}" height="${ih}" opacity="${op}"/></g>`;
+    }
+
     let inner = "";
     if (s.shapeType) {
       const a = shapeAttrs(s);
@@ -598,24 +712,13 @@
   function renderEraserInMask(s: Stroke): string {
     const sw = s.baseWidth;
     const d = s.d || "";
-    return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`;
+    return `<path d="${d}" fill="none" stroke="black" stroke-width="${sw}" stroke-linecap="round"/>`;
   }
 
   function renderLayerEraserSvg(layer: Layer): string {
-    const eraserStrokes = layer.strokes.filter(s => isEraserStroke(s));
-    const drawStrokes = layer.strokes.filter(s => !isEraserStroke(s));
-
     let out = "";
-    if (eraserStrokes.length > 0) {
-      out += `<defs><mask id="emask-${layer.id}">`;
-      out += `<rect width="${w}" height="${h}" fill="white"/>`;
-      for (const s of eraserStrokes) out += renderEraserInMask(s);
-      out += `</mask></defs>`;
-      out += `<g mask="url(#emask-${layer.id})">`;
-      for (const s of drawStrokes) out += renderStroke(s, false);
-      out += `</g>`;
-    } else {
-      for (const s of drawStrokes) out += renderStroke(s, false);
+    for (const s of layer.strokes) {
+      if (!isEraserStroke(s)) out += renderStroke(s, false);
     }
     return out;
   }
@@ -626,9 +729,19 @@
     let inner = "";
     for (const layer of layers) {
       if (!layer.visible) continue;
-      inner += `<g style="isolation:isolate" opacity="${layer.opacity / 100}">`;
-      inner += renderLayerEraserSvg(layer);
-      inner += "</g>";
+      const erStrokes = layer.strokes.filter(s => isEraserStroke(s));
+      if (erStrokes.length > 0) {
+        defs += `<mask id="em${layer.id}" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="white"/>`;
+        for (const s of erStrokes) defs += renderEraserInMask(s);
+        defs += `</mask>`;
+        inner += `<g style="isolation:isolate" opacity="${layer.opacity / 100}" mask="url(#em${layer.id})">`;
+        for (const s of layer.strokes) { if (!isEraserStroke(s)) inner += renderStroke(s, false); }
+        inner += "</g>";
+      } else {
+        inner += `<g style="isolation:isolate" opacity="${layer.opacity / 100}">`;
+        inner += renderLayerEraserSvg(layer);
+        inner += "</g>";
+      }
     }
     if (currentStroke && !isEraserStroke(currentStroke)) inner += renderStroke(currentStroke, true);
     const bg = withBg ? `<rect width="100%" height="100%" fill="${bgColor2}"/>` : "";
@@ -736,6 +849,9 @@
   function uid(): string { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 
   function getStrokeBBox(s: Stroke): { x: number; y: number; w: number; h: number } | null {
+    if (s.imageData && s.points[0]) {
+      return { x: s.points[0].x, y: s.points[0].y, w: s.imageW ?? 100, h: s.imageH ?? 100 };
+    }
     if (s.shapeType) {
       const x = Math.min(s.sx ?? 0, s.ex ?? 0);
       const y = Math.min(s.sy ?? 0, s.ey ?? 0);
@@ -818,9 +934,10 @@
     openMenu = null;
     switch (action) {
       case "new": clearAll(); break;
+      case "import": importImage(); break;
       case "save-png": downloadPng(); break;
       case "save-svg": downloadSvg(); break;
-      case "save-cloud": saveToCloud(); break;
+      case "save-cloud": openSaveDialog(); break;
       case "undo": undo(); break;
       case "redo": redo(); break;
       case "clear": clearAll(); break;
@@ -830,6 +947,7 @@
       case "zoom-out": zoomTo(Math.max(MIN_ZOOM, zoom / 1.5)); break;
       case "grid": settings.showGrid = !settings.showGrid; break;
       case "rulers": settings.showRulers = !settings.showRulers; break;
+      case "resize": openResizeDialog(); break;
       case "flip-h": break;
       case "flip-v": break;
     }
@@ -951,6 +1069,8 @@
       { label: "File", items: [
         { label: "New Canvas", action: "new", key: "" },
         { label: "---" },
+        { label: "Import Image", action: "import", key: "" },
+        { label: "---" },
         { label: "Save PNG", action: "save-png", key: "" },
         { label: "Save SVG", action: "save-svg", key: "" },
         { label: "Save to Cloud", action: "save-cloud", key: "" },
@@ -971,7 +1091,7 @@
         { label: settings.showRulers ? "✓ Rulers" : "  Rulers", action: "rulers", key: "R" },
       ]},
       { label: "Image", items: [
-        { label: `Canvas Size: ${w}×${h}`, action: "", key: "" },
+        { label: `Canvas Size: ${w}×${h}`, action: "resize", key: "" },
         { label: "---" },
         { label: "Flip Horizontal", action: "flip-h", key: "" },
         { label: "Flip Vertical", action: "flip-v", key: "" },
@@ -1165,24 +1285,27 @@
 
             {#each layers as layer (layer.id)}
               {#if layer.visible}
-                {@const hasLiveEraser = currentStroke && isEraserStroke(currentStroke) && currentStroke.layerId === layer.id}
-                {#if hasLiveEraser}
+                {@const hasErs = layer.strokes.some(s => isEraserStroke(s))}
+                {@const liveEr = currentStroke && isEraserStroke(currentStroke) && currentStroke.layerId === layer.id}
+                {#if hasErs || liveEr}
                   <defs>
-                    <mask id="live-eraser-mask-{layer.id}">
+                    <mask id="m{layer.id}" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{h}">
                       <rect width="{w}" height="{h}" fill="white"/>
                       {#each layer.strokes.filter(s => isEraserStroke(s)) as s}
                         <path d={s.d} fill="none" stroke="black" stroke-width={s.baseWidth} stroke-linecap="round"/>
                       {/each}
-                      <path d={currentStroke.d} fill="none" stroke="black" stroke-width={currentStroke.baseWidth} stroke-linecap="round"/>
+                      {#if liveEr}
+                        <path d={currentStroke.d} fill="none" stroke="black" stroke-width={currentStroke.baseWidth} stroke-linecap="round"/>
+                      {/if}
                     </mask>
                   </defs>
-                  <g style="isolation: isolate" opacity={layer.opacity / 100} mask="url(#live-eraser-mask-{layer.id})">
+                  <g style="isolation:isolate" opacity={layer.opacity / 100} mask="url(#m{layer.id})">
                     {#each layer.strokes.filter(s => !isEraserStroke(s)) as s (s.id)}
                       {@html renderStroke(s, false)}
                     {/each}
                   </g>
                 {:else}
-                  <g style="isolation: isolate" opacity={layer.opacity / 100}>
+                  <g style="isolation:isolate" opacity={layer.opacity / 100}>
                     {@html renderLayerEraserSvg(layer)}
                   </g>
                 {/if}
@@ -1522,4 +1645,67 @@
   .rp-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; font-size: 10px; }
   .rp-info-label { color: #555; }
   .rp-info-val { color: #999; text-align: right; font-family: 'Geist Mono', monospace; font-size: 9px; }
+
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 9999; }
+  .modal-box { background: #2a2a2e; border: 1px solid #444; border-radius: 8px; padding: 16px; min-width: 300px; max-width: 400px; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+  .modal-title { font-size: 13px; font-weight: 600; color: #eee; margin-bottom: 12px; }
+  .modal-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .modal-row label { font-size: 11px; color: #888; min-width: 60px; }
+  .modal-row input[type="text"],
+  .modal-row input[type="number"] { flex: 1; background: #1a1a1e; border: 1px solid #444; border-radius: 4px; padding: 4px 8px; color: #ccc; font-size: 12px; font-family: 'Geist Mono', monospace; outline: none; }
+  .modal-row input:focus { border-color: #6366f1; }
+  .modal-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #888; margin-bottom: 8px; }
+  .modal-check input { accent-color: #6366f1; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 14px; }
+  .modal-btn { padding: 5px 14px; border-radius: 4px; border: 1px solid #444; background: #222226; color: #aaa; font-size: 11px; cursor: pointer; transition: .1s; }
+  .modal-btn:hover { border-color: #6366f1; color: #fff; }
+  .modal-btn.primary { background: #6366f1; border-color: #6366f1; color: #fff; font-weight: 600; }
+  .modal-btn.primary:hover { opacity: .85; }
 </style>
+
+<input bind:this={fileInputEl} type="file" accept="image/*" style="display:none" onchange={handleImageFile}/>
+
+{#if showResizeDialog}
+  <div class="modal-overlay" onclick={() => showResizeDialog = false}>
+    <div class="modal-box" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-title">Resize Canvas</div>
+      <div class="modal-row">
+        <label>Width</label>
+        <input type="number" min="1" max="8192" bind:value={resizeW}/>
+      </div>
+      <div class="modal-row">
+        <label>Height</label>
+        <input type="number" min="1" max="8192" bind:value={resizeH}/>
+      </div>
+      <label class="modal-check">
+        <input type="checkbox" bind:checked={resizeScale}/> Scale strokes proportionally
+      </label>
+      <div class="modal-actions">
+        <button class="modal-btn" onclick={() => showResizeDialog = false}>Cancel</button>
+        <button class="modal-btn primary" onclick={applyResize}>Apply</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showSaveDialog}
+  <div class="modal-overlay" onclick={() => showSaveDialog = false}>
+    <div class="modal-box" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-title">Save to Cloud</div>
+      <div class="modal-row">
+        <label>Folder</label>
+        <input type="text" bind:value={saveFolder} placeholder="(root)"/>
+      </div>
+      <div class="modal-row">
+        <label>File name</label>
+        <input type="text" bind:value={saveFileName} placeholder="drawing.png"/>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn" onclick={() => showSaveDialog = false}>Cancel</button>
+        <button class="modal-btn primary" onclick={confirmSaveToCloud} disabled={saving || !saveFileName.trim()}>
+          {#if saving}Saving…{:else}Save{/if}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

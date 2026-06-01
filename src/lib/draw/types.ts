@@ -35,6 +35,9 @@ export type Stroke = {
   layerId: string;
   variableWidthPath?: string;
   brushAngle?: number;
+  imageData?: string;
+  imageW?: number;
+  imageH?: number;
 };
 
 export type Layer = {
