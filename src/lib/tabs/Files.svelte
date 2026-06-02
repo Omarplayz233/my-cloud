@@ -2486,7 +2486,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 9px 10px;
+    padding: 8px 10px;
     border-radius: 8px;
     transition: background 0.1s;
     font-size: 13px;
@@ -2662,8 +2662,6 @@
     position: relative;
   }
   .folder-row {
-    border-left: 2px solid rgba(251, 191, 36, 0.3);
-    margin-left: 2px;
   }
   .folder-badge {
     position: absolute;
@@ -2701,13 +2699,9 @@
     color: var(--text-3);
     text-decoration: none;
     transition: all 0.15s;
-    opacity: 0;
-    pointer-events: none;
   }
   .file-row:hover .act-btn,
   .file-row.selected .act-btn {
-    opacity: 1;
-    pointer-events: auto;
   }
   .act-btn:hover {
     border-color: var(--border);

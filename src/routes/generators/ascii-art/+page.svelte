@@ -34,8 +34,8 @@
 
   const CHARSETS: Record<string, string> = {
     standard: ' .,:;i1tfLCG08@',
-    blocks: ' ·∘○◎●◉⬤■■▓▒░',
-    dots: ' ·∘•●◉',
+    blocks: ' .:-~=+*#%@',
+    dots: ' .oO0@#',
   };
 
   let asciiOutput = $state('');
@@ -119,9 +119,7 @@
       for (let col = 0; col < chars; col++) {
         const idx = (row * chars + col) * 4;
         const r = data[idx], g = data[idx+1], b = data[idx+2];
-        let brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
-        // Apply contrast curve for better differentiation
-        brightness = Math.pow(brightness, 0.7);
+        const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
         const charIdx = Math.min(CHAR_LIST.length - 1, Math.floor(brightness * CHAR_LIST.length));
         grid[row][col] = CHAR_LIST[charIdx] || ' ';
         colors[row][col] = `rgb(${r},${g},${b})`;

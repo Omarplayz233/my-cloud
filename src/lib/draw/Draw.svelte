@@ -877,6 +877,50 @@
       if (e.key === "0") { e.preventDefault(); fitToScreen(); return; }
       if (e.key === "=" || e.key === "+") { e.preventDefault(); zoomTo(Math.min(MAX_ZOOM, zoom * 1.5)); return; }
       if (e.key === "-") { e.preventDefault(); zoomTo(Math.max(MIN_ZOOM, zoom / 1.5)); return; }
+      if (e.key === "v") {
+        navigator.clipboard.read().then(items => {
+          for (const item of items) {
+            const imgType = item.types.find(t => t.startsWith('image/'));
+            if (!imgType) continue;
+            item.getType(imgType).then(blob => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                const img = new Image();
+                img.onload = () => {
+                  let iw = img.naturalWidth;
+                  let ih = img.naturalHeight;
+                  const maxDim = Math.max(w, h) * 0.8;
+                  if (iw > maxDim || ih > maxDim) {
+                    const scale = maxDim / Math.max(iw, ih);
+                    iw *= scale; ih *= scale;
+                  }
+                  const s: Stroke = {
+                    id: "img_" + Date.now().toString(36),
+                    tool: "brush",
+                    color: "#000000",
+                    baseWidth: 0,
+                    opacity: 1,
+                    fill: false,
+                    points: [{ x: (w - iw) / 2, y: (h - ih) / 2, pressure: 0.5, time: performance.now() }],
+                    imageData: dataUrl,
+                    imageW: iw,
+                    imageH: ih,
+                    layerId: getActiveLayer().id,
+                  };
+                  getActiveLayer().strokes = [...getActiveLayer().strokes, s];
+                  pushHistory({ action: "stroke", layerId: s.layerId, strokes: [s] });
+                  layers = [...layers];
+                };
+                img.src = dataUrl;
+              };
+              reader.readAsDataURL(blob);
+            });
+            break;
+          }
+        });
+        return;
+      }
     }
     if (e.key === "Shift") { shiftHeld = true; return; }
     if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {

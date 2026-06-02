@@ -366,6 +366,9 @@
       <h2 class="section-title">Upload heatmap — last 90 days</h2>
       <div class="heatmap-wrap">
         <div class="heatmap-grid">
+          <span class="heatmap-day-label" style="grid-column:1;grid-row:2">Mon</span>
+          <span class="heatmap-day-label" style="grid-column:1;grid-row:4">Wed</span>
+          <span class="heatmap-day-label" style="grid-column:1;grid-row:6">Fri</span>
           {#each heatmapData() as week}
             {#each week as day}
               <div class="heatmap-cell" style="background:{heatmapColor(day.count)};grid-column:{day.col + 2};grid-row:{day.row + 1};" title="{day.count} uploads on {day.day}"></div>
@@ -607,15 +610,15 @@
   }
   .heatmap-grid {
     display: grid;
-    grid-template-columns: repeat(14, 14px);
-    grid-template-rows: repeat(7, 14px);
+    grid-template-columns: repeat(14, 1fr);
+    grid-template-rows: repeat(7, 1fr);
     gap: 3px;
-    width: fit-content;
   }
   .heatmap-cell {
-    width: 14px;
-    height: 14px;
+    aspect-ratio: 1;
     border-radius: 2px;
+    min-width: 12px;
+    min-height: 12px;
   }
   .heatmap-legend {
     display: flex;
@@ -627,6 +630,14 @@
     font-size: 9px;
     color: var(--text-3);
     margin: 0 2px;
+  }
+  .heatmap-day-label {
+    font-size: 9px;
+    color: var(--text-3);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 4px;
   }
 
   /* ── Bar chart ── */
@@ -758,5 +769,6 @@
     .file-rank { min-width: 14px; }
     .donut-wrap { flex-direction: column; align-items: center; }
     .heatmap-grid { grid-template-columns: repeat(13, 1fr); }
+    .heatmap-day-label { display: none; }
   }
 </style>

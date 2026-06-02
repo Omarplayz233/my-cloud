@@ -23,7 +23,7 @@
   const LIGHT = {'--bg-1':'#fafafa','--bg-2':'#ffffff','--bg-3':'#f0f0f0','--text-1':'#1a1a1a','--text-2':'#555','--text-3':'#999','--border':'#e0e0e0','--border-hover':'#bbb','--accent':'#4f46e5','--hover':'rgba(0,0,0,.04)','--red':'#dc2626'};
 
   // ── Controls ──────────────────────────────────────────────────────────
-  let inputText = $state('Hello World');
+  let inputText = $state('Hello World! This is a waveform.');
   type WaveType = 'sine' | 'square' | 'sawtooth' | 'noise';
   let waveType: WaveType = $state('sine');
   let amplitude = $state(80);
@@ -107,15 +107,28 @@
       if (!inputText) { generating = false; return; }
 
       const [cr, cg, cb] = hexToRgb(waveColor);
-      const rand = mulberry32(inputText.split('').reduce((a, c) => a + c.charCodeAt(0), 0));
       const chars = inputText.split('');
       const segW = canvasW / Math.max(chars.length, 1);
       const midY = canvasH / 2;
+      const bottomLabelY = canvasH - 12;
 
-      ctx.lineWidth = 2;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      // Grid: vertical segment separators + center line
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.06)`;
+      ctx.lineWidth = 1;
+      for (let i = 1; i < chars.length; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * segW, 0);
+        ctx.lineTo(i * segW, canvasH);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      ctx.lineTo(canvasW, midY);
+      ctx.stroke();
 
+      // Pre-compute wave points for each segment
+      type SegPoints = { x0: number; points: { x: number; y: number }[]; char: string; charCode: number };
+      const segments: SegPoints[] = [];
       for (let i = 0; i < chars.length; i++) {
         const charCode = chars[i].charCodeAt(0);
         const charNorm = charCode / 127;
@@ -123,49 +136,87 @@
         const segFreq = frequency * (0.5 + charNorm * 0.5);
         const phaseOffset = charCode * 0.5;
         const localRand = mulberry32(charCode * 31 + i * 17);
-
-        // Fade alpha from edges of each segment
         const x0 = i * segW;
-        const x1 = (i + 1) * segW;
-
-        ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.85)`;
-        ctx.beginPath();
         const steps = Math.ceil(segW);
+        const points: { x: number; y: number }[] = [];
         for (let s = 0; s <= steps; s++) {
           const t = s / steps;
           const x = x0 + t * segW;
           const waveT = t * segW * segFreq * speed + phaseOffset;
           const val = sampleWave(waveType, waveT, localRand);
           const y = midY + val * segAmp * (1 - 0.3 * Math.pow(t * 2 - 1, 2));
-          if (s === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+          points.push({ x, y });
         }
-        ctx.stroke();
-
-        // Subtle glow
-        ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.15)`;
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        for (let s = 0; s <= steps; s++) {
-          const t = s / steps;
-          const x = x0 + t * segW;
-          const waveT = t * segW * segFreq * speed + phaseOffset;
-          const val = sampleWave(waveType, waveT, localRand);
-          const y = midY + val * segAmp * (1 - 0.3 * Math.pow(t * 2 - 1, 2));
-          if (s === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        ctx.lineWidth = 2;
+        segments.push({ x0, points, char: chars[i], charCode });
       }
 
-      // Draw center line
-      ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.1)`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, midY);
-      ctx.lineTo(canvasW, midY);
-      ctx.stroke();
+      // Fill: area under wave (top half)
+      for (const seg of segments) {
+        const grad = ctx.createLinearGradient(0, midY - amplitude, 0, midY);
+        grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.12)`);
+        grad.addColorStop(1, `rgba(${cr},${cg},${cb},0.01)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(seg.x0, midY);
+        for (const p of seg.points) ctx.lineTo(p.x, p.y);
+        ctx.lineTo(seg.x0 + segW, midY);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Mirror reflection (below midline, flipped)
+      for (const seg of segments) {
+        const grad = ctx.createLinearGradient(0, midY, 0, midY + amplitude);
+        grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.06)`);
+        grad.addColorStop(1, `rgba(${cr},${cg},${cb},0.01)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(seg.x0, midY);
+        for (const p of seg.points) {
+          const dy = p.y - midY;
+          ctx.lineTo(p.x, midY - dy * 0.4);
+        }
+        ctx.lineTo(seg.x0 + segW, midY);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Glow pass
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.25)`;
+      ctx.lineWidth = 8;
+      for (const seg of segments) {
+        ctx.beginPath();
+        for (let j = 0; j < seg.points.length; j++) {
+          const p = seg.points[j];
+          if (j === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+
+      // Main line
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.9)`;
+      ctx.lineWidth = 3;
+      for (const seg of segments) {
+        ctx.beginPath();
+        for (let j = 0; j < seg.points.length; j++) {
+          const p = seg.points[j];
+          if (j === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+
+      // Character labels
+      ctx.font = '10px "Geist Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},0.4)`;
+      for (const seg of segments) {
+        ctx.fillText(seg.char, seg.x0 + segW / 2, bottomLabelY);
+      }
 
       generating = false;
     }));
