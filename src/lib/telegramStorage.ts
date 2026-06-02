@@ -72,9 +72,17 @@ type MutexResolve = () => void;
 let _mutexQueue: MutexResolve[] = [];
 let _mutexLocked = false;
 
-export async function acquireMutex(): Promise<void> {
+export async function acquireMutex(timeoutMs = 10000): Promise<void> {
   if (!_mutexLocked) { _mutexLocked = true; return; }
-  return new Promise<void>(resolve => { _mutexQueue.push(resolve); });
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const idx = _mutexQueue.indexOf(entry);
+      if (idx !== -1) _mutexQueue.splice(idx, 1);
+      reject(new Error('Mutex timeout'));
+    }, timeoutMs);
+    const entry = () => { clearTimeout(timer); resolve(); };
+    _mutexQueue.push(entry);
+  });
 }
 
 export function releaseMutex(): void {
