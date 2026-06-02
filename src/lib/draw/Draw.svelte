@@ -412,6 +412,7 @@
           if (!selectedIds.has(hitId)) { selectedIds.clear(); selectedIds.add(hitId); }
         }
         selectedIds = selectedIds;
+        if (selectedIds.size > 0 && rightPanel !== "selection") rightPanel = "selection";
         selectDragStart = { x: e.clientX, y: e.clientY };
         const layer = getActiveLayer();
         selectDragOffsets = new Map();
@@ -575,6 +576,7 @@
             }
           }
           selectedIds = selectedIds;
+          if (selectedIds.size > 0 && rightPanel !== "selection") rightPanel = "selection";
         }
         marqueeStart = null;
         marqueeEnd = null;
@@ -867,6 +869,128 @@
     return { x: minX - hw, y: minY - hw, w: maxX - minX + s.baseWidth, h: maxY - minY + s.baseWidth };
   }
 
+  // ── Selection properties ──────────────────────────────────────────
+  let lockAspect = $state(true);
+  let selectionAspect = $state(1);
+
+  function getSelectedStrokes(): Stroke[] {
+    const layer = getActiveLayer();
+    return layer.strokes.filter(s => selectedIds.has(s.id));
+  }
+
+  function getSelectionBBox(): { x: number; y: number; w: number; h: number } | null {
+    const strokes = getSelectedStrokes();
+    if (strokes.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of strokes) {
+      const b = getStrokeBBox(s);
+      if (!b) continue;
+      if (b.x < minX) minX = b.x;
+      if (b.y < minY) minY = b.y;
+      if (b.x + b.w > maxX) maxX = b.x + b.w;
+      if (b.y + b.h > maxY) maxY = b.y + b.h;
+    }
+    if (minX === Infinity) return null;
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+
+  function moveStrokes(dx: number, dy: number) {
+    const layer = getActiveLayer();
+    for (const id of selectedIds) {
+      const s = layer.strokes.find(st => st.id === id);
+      if (!s) continue;
+      if (s.shapeType) { s.sx! += dx; s.sy! += dy; s.ex! += dx; s.ey! += dy; }
+      else { for (const p of s.points) { p.x += dx; p.y += dy; } }
+    }
+    layers = [...layers];
+  }
+
+  function resizeSelected(newW: number, newH: number) {
+    const layer = getActiveLayer();
+    const bbox = getSelectionBBox();
+    if (!bbox || bbox.w === 0 || bbox.h === 0) return;
+    const sx = newW / bbox.w;
+    const sy = newH / bbox.h;
+    for (const id of selectedIds) {
+      const s = layer.strokes.find(st => st.id === id);
+      if (!s) continue;
+      if (s.shapeType) {
+        s.sx! = bbox.x + (s.sx! - bbox.x) * sx;
+        s.sy! = bbox.y + (s.sy! - bbox.y) * sy;
+        s.ex! = bbox.x + (s.ex! - bbox.x) * sx;
+        s.ey! = bbox.y + (s.ey! - bbox.y) * sy;
+      } else if (s.imageData) {
+        s.imageW = (s.imageW ?? 100) * sx;
+        s.imageH = (s.imageH ?? 100) * sy;
+        for (const p of s.points) {
+          p.x = bbox.x + (p.x - bbox.x) * sx;
+          p.y = bbox.y + (p.y - bbox.y) * sy;
+        }
+      } else {
+        for (const p of s.points) {
+          p.x = bbox.x + (p.x - bbox.x) * sx;
+          p.y = bbox.y + (p.y - bbox.y) * sy;
+        }
+      }
+    }
+    layers = [...layers];
+  }
+
+  function setSelectionOpacity(val: number) {
+    const layer = getActiveLayer();
+    for (const id of selectedIds) {
+      const s = layer.strokes.find(st => st.id === id);
+      if (s) s.opacity = val / 100;
+    }
+    layers = [...layers];
+  }
+
+  function setSelectionColor(color: string) {
+    const layer = getActiveLayer();
+    for (const id of selectedIds) {
+      const s = layer.strokes.find(st => st.id === id);
+      if (s) s.color = color;
+    }
+    layers = [...layers];
+  }
+
+  function setSelectionFontSize(size: number) {
+    const layer = getActiveLayer();
+    for (const id of selectedIds) {
+      const s = layer.strokes.find(st => st.id === id);
+      if (s && s.text !== undefined) s.fontSize = size;
+    }
+    layers = [...layers];
+  }
+
+  function duplicateSelected() {
+    const layer = getActiveLayer();
+    const newIds: string[] = [];
+    for (const id of selectedIds) {
+      const s = layer.strokes.find(st => st.id === id);
+      if (!s) continue;
+      const clone: Stroke = { ...s, id: "dup_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5) };
+      if (clone.shapeType) { clone.sx = (clone.sx ?? 0) + 20; clone.sy = (clone.sy ?? 0) + 20; clone.ex = (clone.ex ?? 0) + 20; clone.ey = (clone.ey ?? 0) + 20; }
+      else { for (const p of clone.points) { p.x += 20; p.y += 20; } }
+      layer.strokes = [...layer.strokes, clone];
+      newIds.push(clone.id);
+    }
+    selectedIds.clear();
+    for (const id of newIds) selectedIds.add(id);
+    selectedIds = selectedIds;
+    layers = [...layers];
+  }
+
+  function deleteSelected() {
+    const layer = getActiveLayer();
+    const deleted = layer.strokes.filter(s => selectedIds.has(s.id));
+    if (deleted.length) {
+      pushHistory({ action: "stroke", layerId: layer.id, strokes: deleted });
+      layer.strokes = layer.strokes.filter(s => !selectedIds.has(s.id));
+      selectedIds.clear(); selectedIds = selectedIds;
+    }
+  }
+
   // ── Keyboard ────────────────────────────────────────────────────────
   function onkeydown(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -925,17 +1049,10 @@
     if (e.key === "Shift") { shiftHeld = true; return; }
     if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) {
       e.preventDefault();
-      const layer = getActiveLayer();
-      const deleted = layer.strokes.filter(s => selectedIds.has(s.id));
-      if (deleted.length) {
-        pushHistory({ action: "stroke", layerId: layer.id, strokes: deleted });
-        layer.strokes = layer.strokes.filter(s => !selectedIds.has(s.id));
-        selectedIds.clear(); selectedIds = selectedIds;
-        layers = [...layers];
-      }
+      deleteSelected();
       return;
     }
-    if (e.key === "Escape") { selectedIds.clear(); selectedIds = selectedIds; return; }
+    if (e.key === "Escape") { selectedIds.clear(); selectedIds = selectedIds; if (rightPanel === "selection") rightPanel = "brush"; return; }
     const key = e.key.toLowerCase();
     for (const g of TOOL_GROUPS) for (const t of g.tools) { if (t.key === key) { tool = t.id as Tool; return; } }
     if (key === "[") { lineWidth = Math.max(0.5, lineWidth - 1); return; }
@@ -961,7 +1078,7 @@
   });
 
   // ── UI panels ───────────────────────────────────────────────────────
-  let rightPanel = $state<"brush" | "color" | "layers">("brush");
+  let rightPanel = $state<"brush" | "color" | "layers" | "selection">("brush");
   let brushCategory = $state<"all" | BrushPreset["category"]>("all");
 
   let filteredPresets = $derived(
@@ -1460,6 +1577,9 @@
     <!-- ═══ RIGHT PANEL ═══ -->
     <div class="right-panel">
       <div class="rp-tabs">
+        {#if selectedIds.size > 0}
+          <button class="rp-tab" class:active={rightPanel === "selection"} onclick={() => rightPanel = "selection"}>Select</button>
+        {/if}
         <button class="rp-tab" class:active={rightPanel === "brush"} onclick={() => rightPanel = "brush"}>Brush</button>
         <button class="rp-tab" class:active={rightPanel === "color"} onclick={() => rightPanel = "color"}>Color</button>
         <button class="rp-tab" class:active={rightPanel === "layers"} onclick={() => rightPanel = "layers"}>Layers</button>
@@ -1536,6 +1656,91 @@
               </label>
             {/if}
           {/each}
+        {:else if rightPanel === "selection"}
+          {@const selStrokes = getSelectedStrokes()}
+          {@const bbox = getSelectionBBox()}
+          {#if selStrokes.length > 0 && bbox}
+            <div class="rp-heading">Position</div>
+            <div class="sel-row">
+              <label class="sel-field">X
+                <input type="number" value={Math.round(bbox.x)} onchange={(e) => {
+                  const val = parseFloat((e.target as HTMLInputElement).value);
+                  if (!isNaN(val)) moveStrokes(val - bbox.x, 0);
+                }}/>
+              </label>
+              <label class="sel-field">Y
+                <input type="number" value={Math.round(bbox.y)} onchange={(e) => {
+                  const val = parseFloat((e.target as HTMLInputElement).value);
+                  if (!isNaN(val)) moveStrokes(0, val - bbox.y);
+                }}/>
+              </label>
+            </div>
+
+            <div class="rp-heading">Size</div>
+            <div class="sel-row">
+              <label class="sel-field">W
+                <input type="number" min="1" value={Math.round(bbox.w)} onchange={(e) => {
+                  const val = parseFloat((e.target as HTMLInputElement).value);
+                  if (!isNaN(val) && val > 0) {
+                    if (lockAspect && bbox.h > 0) { resizeSelected(val, val * (bbox.h / bbox.w)); }
+                    else { resizeSelected(val, bbox.h); }
+                  }
+                }}/>
+              </label>
+              <label class="sel-field">H
+                <input type="number" min="1" value={Math.round(bbox.h)} onchange={(e) => {
+                  const val = parseFloat((e.target as HTMLInputElement).value);
+                  if (!isNaN(val) && val > 0) {
+                    if (lockAspect && bbox.w > 0) { resizeSelected(bbox.w * (val / bbox.h), val); }
+                    else { resizeSelected(bbox.w, val); }
+                  }
+                }}/>
+              </label>
+              <!-- svelte-ignore a11y_consider_explicit_label -->
+              <button class="sel-lock" class:active={lockAspect} onclick={() => lockAspect = !lockAspect} title="Lock aspect ratio">
+                {lockAspect ? "🔗" : "⛓️‍💥"}
+              </button>
+            </div>
+
+            <div class="rp-heading">Appearance</div>
+            <label class="sel-field sel-full">Opacity
+              <input type="range" min="1" max="100" value={Math.round((selStrokes[0]?.opacity ?? 1) * 100)} oninput={(e) => setSelectionOpacity(parseInt((e.target as HTMLInputElement).value))}/>
+              <span>{Math.round((selStrokes[0]?.opacity ?? 1) * 100)}%</span>
+            </label>
+            {#if selStrokes.every(s => s.tool !== "eraser" && !s.imageData)}
+              <label class="sel-field sel-full">Color
+                <input type="color" value={selStrokes[0]?.color ?? "#000000"} oninput={(e) => setSelectionColor((e.target as HTMLInputElement).value)}/>
+              </label>
+            {/if}
+
+            {#if selStrokes.some(s => s.text !== undefined)}
+              <div class="rp-heading">Text</div>
+              <label class="sel-field sel-full">Font Size
+                <input type="range" min="8" max="200" value={selStrokes.find(s => s.text !== undefined)?.fontSize ?? 32} oninput={(e) => setSelectionFontSize(parseInt((e.target as HTMLInputElement).value))}/>
+                <span>{selStrokes.find(s => s.text !== undefined)?.fontSize ?? 32}px</span>
+              </label>
+            {/if}
+
+            {#if selStrokes.some(s => s.imageData)}
+              <div class="rp-heading">Image</div>
+              <div class="sel-info">
+                <span>{Math.round(selStrokes.find(s => s.imageData)?.imageW ?? 0)} × {Math.round(selStrokes.find(s => s.imageData)?.imageH ?? 0)}px</span>
+              </div>
+            {/if}
+
+            <div class="rp-heading">Info</div>
+            <div class="sel-info">
+              <span>{selStrokes.length} object{selStrokes.length > 1 ? 's' : ''}</span>
+              <span>{selStrokes[0]?.tool}{selStrokes[0]?.shapeType ? ` (${selStrokes[0].shapeType})` : ''}</span>
+            </div>
+
+            <div class="sel-actions">
+              <button class="sel-btn" onclick={duplicateSelected}>Duplicate</button>
+              <button class="sel-btn danger" onclick={deleteSelected}>Delete</button>
+            </div>
+          {:else}
+            <p class="sel-empty">Select an object to edit its properties</p>
+          {/if}
         {/if}
       </div>
     </div>
@@ -1706,6 +1911,25 @@
   .modal-btn:hover { border-color: #6366f1; color: #fff; }
   .modal-btn.primary { background: #6366f1; border-color: #6366f1; color: #fff; font-weight: 600; }
   .modal-btn.primary:hover { opacity: .85; }
+
+  .sel-row { display: flex; align-items: center; gap: 6px; padding: 0 8px; margin-bottom: 6px; }
+  .sel-field { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: #666; flex: 1; }
+  .sel-field input[type="number"] { width: 100%; background: #1a1a1e; border: 1px solid #444; border-radius: 3px; padding: 3px 5px; color: #ccc; font-size: 11px; font-family: 'Geist Mono', monospace; outline: none; }
+  .sel-field input[type="number"]:focus { border-color: #6366f1; }
+  .sel-field input[type="range"] { width: 100%; accent-color: #6366f1; }
+  .sel-field input[type="color"] { width: 100%; height: 24px; border: 1px solid #444; border-radius: 3px; background: #1a1a1e; cursor: pointer; padding: 1px; }
+  .sel-field span { font-size: 10px; color: #555; font-family: 'Geist Mono', monospace; }
+  .sel-full { padding: 0 8px; margin-bottom: 6px; }
+  .sel-lock { width: 26px; height: 26px; border-radius: 4px; border: 1px solid #444; background: #222226; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: .1s; }
+  .sel-lock:hover { border-color: #6366f1; }
+  .sel-lock.active { border-color: #6366f1; background: rgba(99,102,241,.15); }
+  .sel-info { padding: 4px 8px; font-size: 11px; color: #666; display: flex; flex-direction: column; gap: 2px; }
+  .sel-actions { display: flex; gap: 6px; padding: 8px; }
+  .sel-btn { flex: 1; padding: 5px 0; border-radius: 4px; border: 1px solid #444; background: #222226; color: #aaa; font-size: 11px; cursor: pointer; transition: .1s; }
+  .sel-btn:hover { border-color: #6366f1; color: #fff; }
+  .sel-btn.danger { border-color: #664; }
+  .sel-btn.danger:hover { border-color: #f44; color: #f44; background: rgba(255,68,68,.1); }
+  .sel-empty { padding: 16px 8px; font-size: 11px; color: #555; text-align: center; }
 </style>
 
 <input bind:this={fileInputEl} type="file" accept="image/*" style="display:none" onchange={handleImageFile}/>
