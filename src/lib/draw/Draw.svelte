@@ -6,7 +6,7 @@
     IconArrowBadgeRight, IconTrash, IconDownload, IconUpload, IconBrush,
     IconTriangle, IconColorPicker, IconBucketDroplet,
     IconLetterT, IconPointer, IconSelector,
-    IconGridDots, IconRuler,
+    IconGridDots, IconRuler, IconLock, IconLockOpen,
   } from "@tabler/icons-svelte";
   import type { Tool, Point, Stroke, Layer, BrushPreset, HistoryEntry, CanvasSettings } from "./types";
   import { BRUSH_PRESETS } from "./presets";
@@ -1698,7 +1698,7 @@
               </label>
               <!-- svelte-ignore a11y_consider_explicit_label -->
               <button class="sel-lock" class:active={lockAspect} onclick={() => lockAspect = !lockAspect} title="Lock aspect ratio">
-                {lockAspect ? "🔗" : "⛓️‍💥"}
+                {#if lockAspect}<IconLock size={14}/>{:else}<IconLockOpen size={14}/>{/if}
               </button>
             </div>
 
