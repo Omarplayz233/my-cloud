@@ -352,6 +352,8 @@
   let selectDragOffsets = $state<Map<string,{dx:number;dy:number}>>(new Map());
   let marqueeStart = $state<{x:number;y:number} | null>(null);
   let marqueeEnd = $state<{x:number;y:number} | null>(null);
+  let selectionVersion = $state(0);
+  let hasSelection = $derived(selectionVersion > 0 && selectedIds.size > 0);
 
   // ── Strokes ─────────────────────────────────────────────────────────
   let drawing = $state(false);
@@ -412,6 +414,7 @@
           if (!selectedIds.has(hitId)) { selectedIds.clear(); selectedIds.add(hitId); }
         }
         selectedIds = selectedIds;
+        selectionVersion++;
         if (selectedIds.size > 0 && rightPanel !== "selection") rightPanel = "selection";
         selectDragStart = { x: e.clientX, y: e.clientY };
         const layer = getActiveLayer();
@@ -431,6 +434,7 @@
       } else {
         if (!e.shiftKey) selectedIds.clear();
         selectedIds = selectedIds;
+        selectionVersion++;
         marqueeStart = { x: e.clientX, y: e.clientY };
         marqueeEnd = { x: e.clientX, y: e.clientY };
       }
@@ -576,6 +580,7 @@
             }
           }
           selectedIds = selectedIds;
+          selectionVersion++;
           if (selectedIds.size > 0 && rightPanel !== "selection") rightPanel = "selection";
         }
         marqueeStart = null;
@@ -978,6 +983,7 @@
     selectedIds.clear();
     for (const id of newIds) selectedIds.add(id);
     selectedIds = selectedIds;
+    selectionVersion++;
     layers = [...layers];
   }
 
@@ -988,6 +994,7 @@
       pushHistory({ action: "stroke", layerId: layer.id, strokes: deleted });
       layer.strokes = layer.strokes.filter(s => !selectedIds.has(s.id));
       selectedIds.clear(); selectedIds = selectedIds;
+      selectionVersion++;
     }
   }
 
@@ -1052,7 +1059,7 @@
       deleteSelected();
       return;
     }
-    if (e.key === "Escape") { selectedIds.clear(); selectedIds = selectedIds; if (rightPanel === "selection") rightPanel = "brush"; return; }
+    if (e.key === "Escape") { selectedIds.clear(); selectedIds = selectedIds; selectionVersion = 0; if (rightPanel === "selection") rightPanel = "brush"; return; }
     const key = e.key.toLowerCase();
     for (const g of TOOL_GROUPS) for (const t of g.tools) { if (t.key === key) { tool = t.id as Tool; return; } }
     if (key === "[") { lineWidth = Math.max(0.5, lineWidth - 1); return; }
@@ -1577,7 +1584,7 @@
     <!-- ═══ RIGHT PANEL ═══ -->
     <div class="right-panel">
       <div class="rp-tabs">
-        {#if selectedIds.size > 0}
+        {#if hasSelection}
           <button class="rp-tab" class:active={rightPanel === "selection"} onclick={() => rightPanel = "selection"}>Select</button>
         {/if}
         <button class="rp-tab" class:active={rightPanel === "brush"} onclick={() => rightPanel = "brush"}>Brush</button>
@@ -1920,9 +1927,9 @@
   .sel-field input[type="color"] { width: 100%; height: 24px; border: 1px solid #444; border-radius: 3px; background: #1a1a1e; cursor: pointer; padding: 1px; }
   .sel-field span { font-size: 10px; color: #555; font-family: 'Geist Mono', monospace; }
   .sel-full { padding: 0 8px; margin-bottom: 6px; }
-  .sel-lock { width: 26px; height: 26px; border-radius: 4px; border: 1px solid #444; background: #222226; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: .1s; }
-  .sel-lock:hover { border-color: #6366f1; }
-  .sel-lock.active { border-color: #6366f1; background: rgba(99,102,241,.15); }
+  .sel-lock { width: 26px; height: 26px; border-radius: 4px; border: 1px solid #444; background: #222226; color: #aaa; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: .1s; }
+  .sel-lock:hover { border-color: #6366f1; color: #fff; }
+  .sel-lock.active { border-color: #6366f1; color: #6366f1; background: rgba(99,102,241,.15); }
   .sel-info { padding: 4px 8px; font-size: 11px; color: #666; display: flex; flex-direction: column; gap: 2px; }
   .sel-actions { display: flex; gap: 6px; padding: 8px; }
   .sel-btn { flex: 1; padding: 5px 0; border-radius: 4px; border: 1px solid #444; background: #222226; color: #aaa; font-size: 11px; cursor: pointer; transition: .1s; }
