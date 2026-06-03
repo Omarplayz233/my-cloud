@@ -10,11 +10,12 @@
     IconVideo,
     IconMusic,
     IconNote,
+    IconTerminal,
   } from '@tabler/icons-svelte';
   import { env } from '$env/dynamic/public';
   const NAME = env.PUBLIC_NAME ?? "Omar";
 
-  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault' | 'video' | 'music' | 'notes';
+  type Tab = 'files' | 'generators' | 'downloader' | 'draw' | 'stats' | 'editor' | 'vault' | 'video' | 'music' | 'notes' | 'console';
 
   let {
     user,
@@ -73,11 +74,13 @@
     { id: 'music',      icon: IconMusic,            label: 'Music'      },
     { id: 'stats',      icon: IconChartBar,          label: 'Stats'      },
     { id: 'notes',      icon: IconNote,               label: 'Notes'      },
-    { id: 'vault',      icon: IconLock,                label: 'Vault' }
+    { id: 'vault',      icon: IconLock,                label: 'Vault' },
+    { id: 'console',   icon: IconTerminal,            label: 'Console' }
   ];
   // Mobile: primary tabs shown in bottom bar, secondary in sheet
   const PRIMARY_TABS: Tab[] = ['files', 'draw', 'video', 'music', 'stats', 'notes', 'vault'];
-  const SECONDARY_TABS = TABS.filter(t => !PRIMARY_TABS.includes(t.id));
+  const secondaryIds: Tab[] = ['generators', 'downloader', 'console'];
+  const secondaryTabs = TABS.filter(t => secondaryIds.includes(t.id));
   const primaryTabs = TABS.filter(t => PRIMARY_TABS.includes(t.id));
 
   function fmtBytes(b: number) {
@@ -181,7 +184,7 @@
       <div class="sheet-divider"></div>
       <!-- Secondary tabs -->
       <div class="sheet-tabs">
-        {#each SECONDARY_TABS as tab}
+        {#each secondaryTabs as tab}
           {@const active = activeTab === tab.id}
           <button class="sheet-tab" class:sheet-tab-active={active}
             onclick={() => { ontabchange(tab.id); sheetOpen = false; }}>
