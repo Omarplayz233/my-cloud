@@ -1,7 +1,6 @@
 // src/routes/api/debug/exec/+server.ts
 import type { RequestHandler } from './$types';
 import { getRecordByApiKey } from '$lib/telegramStorage';
-import vm from 'vm';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   try {
@@ -27,23 +26,42 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
       return new Response(JSON.stringify({ error: 'No code provided' }), { status: 400 });
     }
 
-    let result: any;
-    try {
-      const sandbox = { process, require, console, Buffer, setTimeout, clearTimeout, setInterval, clearInterval };
-      const ctx = vm.createContext(sandbox);
-      result = vm.runInNewContext(code, ctx, { timeout: 5000 });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ error: err?.message || 'Eval error' }), { status: 400 });
+    const expr = code.trim();
+
+    // Direct env access: process.env.FOO or process.env["FOO"]
+    const envMatch = expr.match(/^process\.env\[?["']([A-Z_][A-Z0-9_]*)["']\]?$/i);
+    if (envMatch) {
+      const val = process.env[envMatch[1]];
+      const output = val !== undefined ? val : `(undefined — key "${envMatch[1]}" not set)`;
+      return new Response(JSON.stringify({ result: output }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
-    if (result instanceof Promise) {
-      result = await result;
+    // process.env (whole object, filtered to non-empty)
+    if (expr === 'process.env') {
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined) env[k] = v;
+      }
+      return new Response(JSON.stringify({ result: JSON.stringify(env, null, 2) }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
-    const output = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-    return new Response(JSON.stringify({ result: output }), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    // process.env.VAR fallback
+    const dotMatch = expr.match(/^process\.env\.([A-Z_][A-Z0-9_]*)$/i);
+    if (dotMatch) {
+      const val = process.env[dotMatch[1]];
+      const output = val !== undefined ? val : `(undefined — key "${dotMatch[1]}" not set)`;
+      return new Response(JSON.stringify({ result: output }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    return new Response(JSON.stringify({
+      error: `Only process.env expressions are supported in Workers mode. Try: process.env.TELEGRAM_BOT_TOKEN`
+    }), { status: 400 });
   } catch (err: any) {
     console.error('debug/exec error:', err?.message || err);
     return new Response(JSON.stringify({ error: err?.message || 'Internal error' }), { status: 500 });
