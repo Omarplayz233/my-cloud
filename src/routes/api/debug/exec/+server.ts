@@ -1,6 +1,7 @@
 // src/routes/api/debug/exec/+server.ts
 import type { RequestHandler } from './$types';
 import { getRecordByApiKey } from '$lib/telegramStorage';
+import vm from 'vm';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
   try {
@@ -28,8 +29,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
     let result: any;
     try {
-      const fn = new Function('process', 'require', `return (${code})`);
-      result = fn(process, require);
+      const sandbox = { process, require, console, Buffer, setTimeout, clearTimeout, setInterval, clearInterval };
+      const ctx = vm.createContext(sandbox);
+      result = vm.runInNewContext(code, ctx, { timeout: 5000 });
     } catch (err: any) {
       return new Response(JSON.stringify({ error: err?.message || 'Eval error' }), { status: 400 });
     }
