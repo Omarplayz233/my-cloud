@@ -7,6 +7,7 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
+		"start": "node build",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -14,7 +15,7 @@
 		"cleanup:duplicates": "npx ts-node --esm scripts/cleanup-duplicates.ts"
 	},
 	"devDependencies": {
-		"@sveltejs/adapter-cloudflare": "^7.2.8",
+		"@sveltejs/adapter-node": "^5.2.12",
 		"@sveltejs/kit": "^2.50.2",
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@types/qrcode": "^1.5.6",
