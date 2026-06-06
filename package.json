@@ -37,7 +37,6 @@
 		"fflate": "^0.8.2",
 		"form-data": "^4.0.5",
 		"marked": "^18.0.4",
-		"qrcode": "^1.5.4",
-		"wrangler": "^4.96.0"
+		"qrcode": "^1.5.4"
 	}
 }
