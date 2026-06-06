@@ -488,28 +488,51 @@ export async function uploadBytesToTelegram(
   if (!bytes || bytes.length === 0) {
     throw new Error(`Cannot upload empty file: ${filename}. The file has 0 bytes.`);
   }
-  const tmp = `/tmp/_chunk_${Date.now()}`;
-  await fs.promises.writeFile(tmp, bytes);
+  if (!TELE_API) throw new Error('Telegram not configured');
 
-  try {
-    return await uploadFileStream(tmp, filename);
-  } finally {
-    await fs.promises.unlink(tmp).catch(() => {});
+  const form = new FormData();
+  form.append('chat_id', CHAT_ID);
+  const blob = new Blob([bytes]);
+  form.append('document', blob, filename);
+
+  const res = await fetch(`${TELE_API}/sendDocument`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`sendDocument error: ${res.status} ${txt}`);
   }
+  const json = await res.json().catch(() => null);
+  if (!json?.ok) throw new Error('sendDocument failed: ' + JSON.stringify(json));
+
+  return {
+    message_id: json.result.message_id as number,
+    file_id: json.result.document.file_id as string
+  };
 }
 
 export async function uploadJsonToTelegram(
   data: any,
   filename = 'meta.json'
 ): Promise<{ message_id: number; file_id: string }> {
-  const tmp = `/tmp/_meta_${Date.now()}.json`;
-  await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+  if (!TELE_API) throw new Error('Telegram not configured');
 
-  try {
-    return await uploadFileStream(tmp, filename);
-  } finally {
-    await fs.promises.unlink(tmp).catch(() => {});
+  const jsonStr = JSON.stringify(data, null, 2);
+  const form = new FormData();
+  form.append('chat_id', CHAT_ID);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  form.append('document', blob, filename);
+
+  const res = await fetch(`${TELE_API}/sendDocument`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`sendDocument error: ${res.status} ${txt}`);
   }
+  const json = await res.json().catch(() => null);
+  if (!json?.ok) throw new Error('sendDocument failed: ' + JSON.stringify(json));
+
+  return {
+    message_id: json.result.message_id as number,
+    file_id: json.result.document.file_id as string
+  };
 }
 
 /* -------------------- Public path helpers -------------------- */

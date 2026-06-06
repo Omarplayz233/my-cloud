@@ -642,12 +642,15 @@
       async function uploadOneChunk(i: number) {
         const start = i * CHUNK_SIZE;
         const blob  = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
-        const form  = new FormData();
-        form.append("file", new Blob([blob], { type: file.type || "application/octet-stream" }), file.name);
         const res = await fetch(`${BASE}/api/telegram/uploadChunk`, {
           method: "POST",
-          headers: { "X-Api-Key": apiKey, "X-Chunk-Index": String(i), "X-File-Name": encodeURIComponent(file.name) },
-          body: form,
+          headers: {
+            "X-Api-Key": apiKey,
+            "X-Chunk-Index": String(i),
+            "X-File-Name": encodeURIComponent(file.name),
+            "Content-Type": file.type || "application/octet-stream"
+          },
+          body: blob,
         });
         const d = await res.json();
         if (d.error) throw new Error(d.error);

@@ -3,45 +3,6 @@ import type { RequestHandler } from './$types';
 import { getRecordByApiKey, uploadBytesToTelegram, uploadJsonToTelegram, registerFile } from '$lib/telegramStorage';
 import { TG_SAFE_CHUNK_BYTES } from '$lib/telegramLimits';
 
-function parseBoundary(contentType: string | null): string | null {
-  if (!contentType) return null;
-  const m = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-  return m ? (m[1] ?? m[2]).trim() : null;
-}
-
-function extractFileFromMultipart(body: Uint8Array, contentTypeHeader: string | null) {
-  const boundary = parseBoundary(contentTypeHeader);
-  if (!boundary) throw new Error('No multipart boundary found in Content-Type');
-  const buf = Buffer.from(body);
-  const delimBuf = Buffer.from(`\r\n--${boundary}`);
-  const firstDelim = Buffer.from(`--${boundary}`);
-  const positions: number[] = [];
-  let pos = buf.indexOf(firstDelim);
-  if (pos === -1) throw new Error('No boundary found in body');
-  positions.push(pos);
-  pos = buf.indexOf(delimBuf, pos + firstDelim.length);
-  while (pos !== -1) {
-    positions.push(pos + 2);
-    pos = buf.indexOf(delimBuf, pos + delimBuf.length);
-  }
-  for (let i = 0; i < positions.length - 1; i++) {
-    const partStart = positions[i] + `--${boundary}`.length + 2;
-    const partEnd = positions[i + 1] - 2;
-    const part = buf.slice(partStart, partEnd);
-    const headerEndIdx = part.indexOf('\r\n\r\n');
-    if (headerEndIdx === -1) continue;
-    const headerStr = part.slice(0, headerEndIdx).toString('utf8');
-    const fileData = part.slice(headerEndIdx + 4);
-    const cdMatch = headerStr.match(/Content-Disposition\s*:[^\r\n]*;\s*name="([^"]*)"(?:[^\r\n]*;\s*filename="([^"]*)")?/i);
-    if (!cdMatch) continue;
-    const filename = cdMatch[2];
-    if (!filename) continue;
-    const ctMatch = headerStr.match(/Content-Type\s*:\s*([^\r\n]+)/i);
-    return { fieldName: cdMatch[1], filename, contentType: ctMatch?.[1].trim() ?? 'application/octet-stream', data: fileData };
-  }
-  return null;
-}
-
 export const POST: RequestHandler = async ({ request, url }) => {
   try {
     const apiKey = (request.headers.get('x-api-key') ?? url.searchParams.get('api_key') ?? '').trim();
@@ -57,30 +18,63 @@ export const POST: RequestHandler = async ({ request, url }) => {
     if (!rec)
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
 
-    const arr = await request.arrayBuffer();
-    const buf = new Uint8Array(arr);
-    const contentTypeHeader = request.headers.get('content-type');
-    const filePart = extractFileFromMultipart(buf, contentTypeHeader);
-    if (!filePart)
-      return new Response(JSON.stringify({ error: 'No file part found' }), { status: 400 });
+    const contentType = request.headers.get('content-type') ?? '';
+    let fileData: Uint8Array;
+    let safeName: string;
+    let mimeType: string;
 
-    const safeName = filePart.filename.split('/').pop() || fileRequestHeader || 'upload.bin';
-    const time = new Date().toISOString();
-    const type = filePart.contentType || contentTypeHeader || 'application/octet-stream';
-    const totalBytes = filePart.data.length;
-
-    if (totalBytes === 0) {
-      return new Response(JSON.stringify({ error: 'File is empty (0 bytes). Make sure the file has content before uploading.' }), { status: 400 });
+    if (contentType.includes('multipart/form-data')) {
+      const arr = await request.arrayBuffer();
+      const buf = new Uint8Array(arr);
+      const boundary = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+      if (!boundary) return new Response(JSON.stringify({ error: 'No boundary' }), { status: 400 });
+      const bnd = boundary[1] ?? boundary[2];
+      const body = Buffer.from(buf);
+      const delim = Buffer.from(`\r\n--${bnd}`);
+      const first = Buffer.from(`--${bnd}`);
+      const positions: number[] = [];
+      let pos = body.indexOf(first);
+      if (pos === -1) return new Response(JSON.stringify({ error: 'No boundary found' }), { status: 400 });
+      positions.push(pos);
+      pos = body.indexOf(delim, pos + first.length);
+      while (pos !== -1) { positions.push(pos + 2); pos = body.indexOf(delim, pos + delim.length); }
+      let found = false;
+      for (let i = 0; i < positions.length - 1; i++) {
+        const partStart = positions[i] + `--${bnd}`.length + 2;
+        const partEnd = positions[i + 1] - 2;
+        const part = body.slice(partStart, partEnd);
+        const headerEndIdx = part.indexOf('\r\n\r\n');
+        if (headerEndIdx === -1) continue;
+        const headerStr = part.slice(0, headerEndIdx).toString('utf8');
+        const cdMatch = headerStr.match(/name="([^"]*)"(?:.*filename="([^"]*)")?/i);
+        if (!cdMatch || !cdMatch[2]) continue;
+        fileData = part.slice(headerEndIdx + 4);
+        const ctMatch = headerStr.match(/Content-Type\s*:\s*([^\r\n]+)/i);
+        mimeType = ctMatch?.[1]?.trim() ?? 'application/octet-stream';
+        safeName = cdMatch[2].split('/').pop() || fileRequestHeader || 'upload.bin';
+        found = true;
+        break;
+      }
+      if (!found) return new Response(JSON.stringify({ error: 'No file part' }), { status: 400 });
+    } else {
+      fileData = new Uint8Array(await request.arrayBuffer());
+      mimeType = contentType || 'application/octet-stream';
+      safeName = fileRequestHeader || 'upload.bin';
     }
 
-    // If this upload is larger than what Telegram Bot API can later download via `getFile`,
-    // store it as multiple chunks.
+    const time = new Date().toISOString();
+    const totalBytes = fileData!.length;
+
+    if (totalBytes === 0) {
+      return new Response(JSON.stringify({ error: 'File is empty (0 bytes).' }), { status: 400 });
+    }
+
     const nChunks = Math.max(1, Math.ceil(totalBytes / TG_SAFE_CHUNK_BYTES));
     const telegramChunks: { index: number; file_id: string; message_id: number; size: number }[] = [];
 
     for (let i = 0; i < nChunks; i++) {
       const start = i * TG_SAFE_CHUNK_BYTES;
-      const slice = filePart.data.slice(start, Math.min(start + TG_SAFE_CHUNK_BYTES, totalBytes));
+      const slice = fileData!.slice(start, Math.min(start + TG_SAFE_CHUNK_BYTES, totalBytes));
       const { message_id, file_id } = await uploadBytesToTelegram(slice, `${safeName}.chunk${i}`);
       telegramChunks.push({ index: i, file_id, message_id, size: slice.length });
     }
@@ -88,7 +82,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
     const chunked = telegramChunks.length > 1;
     const meta = {
       fileName: safeName,
-      type,
+      type: mimeType,
       time,
       totalBytes,
       chunked,
@@ -101,7 +95,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
 
     await registerFile({
       fileName: safeName,
-      type,
+      type: mimeType,
       totalBytes,
       time,
       telegramFileId: chunked ? '' : telegramChunks[0].file_id,
