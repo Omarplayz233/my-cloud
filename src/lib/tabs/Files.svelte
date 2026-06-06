@@ -818,14 +818,47 @@
         tasks.push(...selectedFileIds.map(id => duplicateFile(id)));
       }
     }
-    if (selectedFolderIds.length > 0 && clipboard.action === 'move') {
-      tasks.push(...selectedFolderIds.map(id => 
-        fetch(`${BASE}/api/telegram/folderOps`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Api-Key": apiKey ?? "" },
-          body: JSON.stringify({ action: "rename", folderId: id, parentId: currentFolderId ?? null }),
-        })
-      ));
+    if (selectedFolderIds.length > 0) {
+      for (const id of selectedFolderIds) {
+        const srcFolder = folders.find(f => f.folderId === id);
+        if (!srcFolder) continue;
+        if (clipboard.action === 'move') {
+          tasks.push(
+            fetch(`${BASE}/api/telegram/folderOps`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Api-Key": apiKey ?? "" },
+              body: JSON.stringify({ action: "rename", folderId: id, parentId: currentFolderId ?? null }),
+            })
+          );
+        } else {
+          const copyName = srcFolder.name + " (copy)";
+          tasks.push(
+            (async () => {
+              const res = await fetch(`${BASE}/api/telegram/folderOps`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Api-Key": apiKey ?? "" },
+                body: JSON.stringify({ action: "create", name: copyName, parentId: currentFolderId ?? null }),
+              });
+              const data = await res.json();
+              if (data.folder) {
+                const childFiles = files.filter(f => f.folderId === id);
+                const childFolders = folders.filter(f => f.parentId === id);
+                const subTasks = [
+                  ...childFiles.map(f => moveFileToFolder(f.metaFileId, data.folder.folderId)),
+                  ...childFolders.map(cf =>
+                    fetch(`${BASE}/api/telegram/folderOps`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", "X-Api-Key": apiKey ?? "" },
+                      body: JSON.stringify({ action: "rename", folderId: cf.folderId, parentId: data.folder.folderId }),
+                    })
+                  )
+                ];
+                await Promise.all(subTasks);
+              }
+            })()
+          );
+        }
+      }
     }
     await Promise.all(tasks);
     await loadFiles(searchQuery);
@@ -1226,6 +1259,22 @@
         renamingFolderId = null;
         renamingFileId = null;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "c" && contextMenu?.target) {
+        e.preventDefault();
+        copyToInternalClipboard(contextMenu.target, 'copy');
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "x" && contextMenu?.target) {
+        e.preventDefault();
+        copyToInternalClipboard(contextMenu.target, 'move');
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "v" && clipboard) {
+        e.preventDefault();
+        pasteFromInternalClipboard();
+      }
+      if (e.key === "Delete" && selectedIds.size > 0) {
+        e.preventDefault();
+        showDeleteConfirm = true;
+      }
     }
 
     // Action for auto-focus and selection
@@ -1300,6 +1349,10 @@
         { label: 'Rename', icon: IconEdit, action: () => { if (target) { renamingFolderId = target.folderId; renameFolderValue = target.name; } } },
         { label: 'Favorite', icon: target?.favorite ? IconStarFilled : IconStar, action: () => target && toggleFolderFavorite(target) },
         { label: 'Public', icon: IconWorld, action: () => target && toggleFolderPublic(target, false) },
+        { separator: true },
+        { label: 'Copy', icon: IconCopy, action: () => target && copyToInternalClipboard(target, 'copy') },
+        { label: 'Cut', icon: IconScissors, action: () => target && copyToInternalClipboard(target, 'move') },
+        ...(clipboard ? [{ label: 'Paste', icon: IconClipboardCheck, action: () => pasteFromInternalClipboard() }] : []),
         { separator: true },
         { label: 'Download as ZIP', icon: IconDownload, action: () => target && downloadFolder(target.folderId) },
         { label: 'Properties', icon: IconInfoCircle, action: () => sidebarFile = target },
